@@ -1,5 +1,5 @@
 {
-  "name": "LWY-first-plugin",
+  "name": "figma-github-design-token",
   "version": "1.0.0",
   "description": "Your Figma Plugin",
   "main": "code.js",
