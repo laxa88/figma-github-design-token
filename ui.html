@@ -34,54 +34,54 @@
     importButton.setAttribute("disabled", "");
     errorText.innerHTML = "";
 
-    try {
-      const res = await fetch(
-        `https://api.github.com/repos/${ownerField.value}/${repoField.value}/pulls`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${tokenField.value}`,
-            Accept: "application/vnd.github.v3+json",
-            "Content-Type": "application/json",
-          },
-          body: undefined,
-        }
-      );
-
-      if (res.status !== 200) {
-        const body = await res.json();
-        throw { res, body };
-      }
-
-      const body = await res.json();
-
-      parent.postMessage(
-        { pluginMessage: { type: "import-to-figma", body } },
-        "*"
-      );
-    } catch (err) {
-      console.log(err);
-      errorText.innerHTML = "Error occured. Check console for more info.";
-    } finally {
-      importButton.removeAttribute("disabled");
-    }
+    parent.postMessage(
+      {
+        pluginMessage: {
+          type: "import-to-figma",
+          token: tokenField.value,
+          owner: ownerField.value,
+          repo: repoField.value,
+        },
+      },
+      "*"
+    );
   };
 
   exportButton.onclick = async () => {
     exportButton.setAttribute("disabled", "");
     errorText.innerHTML = "";
 
-    try {
-      // TODO
-    } catch (err) {
-      console.log(err);
-    } finally {
-      exportButton.removeAttribute("disabled");
-    }
-
     parent.postMessage(
-      { pluginMessage: { type: "export-to-github", body } },
+      {
+        pluginMessage: {
+          type: "export-to-github",
+          token: tokenField.value,
+          owner: ownerField.value,
+          repo: repoField.value,
+        },
+      },
       "*"
     );
+  };
+
+  window.onmessage = async (msg) => {
+    const pluginMessage = msg.data.pluginMessage;
+    console.log(pluginMessage);
+
+    switch (pluginMessage.type) {
+      case "import-to-figma":
+        // TODO: handle error
+        importButton.removeAttribute("disabled");
+        break;
+
+      case "export-to-github":
+        // TODO: handle error
+        exportButton.removeAttribute("disabled");
+        break;
+
+      default:
+        console.warn("Unknown message:", pluginMessage);
+        break;
+    }
   };
 </script>

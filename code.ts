@@ -9,12 +9,28 @@
 // This shows the HTML page in "ui.html".
 figma.showUI(__html__);
 
-type MessageType = "import-to-figma" | "export-to-github";
+type MessageImport = {
+  type: "import-to-figma";
+  token: string;
+  owner: string;
+  repo: string;
+};
+
+type MessageExport = {
+  type: "export-to-github";
+  token: string;
+  owner: string;
+  repo: string;
+  branchName: string; // TODO: for creating PR
+};
+
+// type MessageType = "import-to-figma" | "export-to-github";
+type Message = MessageImport | MessageExport;
 
 // Calls to "parent.postMessage" from within the HTML page will trigger this
 // callback. The callback will be passed the "pluginMessage" property of the
 // posted message.
-figma.ui.onmessage = (msg: { type: MessageType; content: unknown }) => {
+figma.ui.onmessage = async (msg: Message) => {
   // One way of distinguishing between different types of messages sent from
   // your HTML page is to use an object with a "type" property like this.
 
@@ -22,7 +38,7 @@ figma.ui.onmessage = (msg: { type: MessageType; content: unknown }) => {
 
   switch (msg.type) {
     case "import-to-figma":
-      // TODO
+      importDesignTokens(msg.token, msg.owner, msg.repo);
       break;
 
     case "export-to-github":
@@ -30,7 +46,7 @@ figma.ui.onmessage = (msg: { type: MessageType; content: unknown }) => {
       break;
 
     default:
-      console.log(`Unknown message type: ${msg.type}`);
+      console.error("Unknown message type:", msg);
       break;
   }
 
@@ -38,3 +54,40 @@ figma.ui.onmessage = (msg: { type: MessageType; content: unknown }) => {
   // keep running, which shows the cancel button at the bottom of the screen.
   // figma.closePlugin();
 };
+
+async function importDesignTokens(token: string, owner: string, repo: string) {
+  const localCollections =
+    await figma.variables.getLocalVariableCollectionsAsync();
+
+  console.log(
+    "collections",
+    localCollections.map((i) => i.name)
+  );
+
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github.v3+json",
+        "Content-Type": "application/json",
+      },
+      body: undefined,
+    }
+  );
+
+  if (res.status !== 200) {
+    const body = await res.json();
+    throw { res, body };
+  }
+
+  const body = await res.json();
+
+  console.log("body", body);
+
+  // figma.ui.postMessage({
+  //   type: msg.type,
+  //   content: msg.content,
+  // });
+}
