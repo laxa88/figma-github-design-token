@@ -1,0 +1,87 @@
+<div>
+  <label for="token">Github API Token</label>
+  <input id="token" type="text" />
+</div>
+
+<div>
+  <label for="token">Owner</label>
+  <input id="owner" type="text" />
+</div>
+
+<div>
+  <label for="repo">Repository</label>
+  <input id="repo" type="text" />
+</div>
+
+<button id="importButton">Import</button>
+<button id="exportButton">Export</button>
+<div id="errors"></div>
+
+<script>
+  const tokenField = document.getElementById("token");
+  const ownerField = document.getElementById("owner");
+  const repoField = document.getElementById("repo");
+  const importButton = document.getElementById("importButton");
+  const exportButton = document.getElementById("exportButton");
+  const errorText = document.getElementById("errors");
+
+  // TODO: hard-code this if you need a default
+  tokenField.value = "";
+  ownerField.value = "";
+  repoField.value = "";
+
+  importButton.onclick = async () => {
+    importButton.setAttribute("disabled", "");
+    errorText.innerHTML = "";
+
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${ownerField.value}/${repoField.value}/pulls`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${tokenField.value}`,
+            Accept: "application/vnd.github.v3+json",
+            "Content-Type": "application/json",
+          },
+          body: undefined,
+        }
+      );
+
+      if (res.status !== 200) {
+        const body = await res.json();
+        throw { res, body };
+      }
+
+      const body = await res.json();
+
+      parent.postMessage(
+        { pluginMessage: { type: "import-to-figma", body } },
+        "*"
+      );
+    } catch (err) {
+      console.log(err);
+      errorText.innerHTML = "Error occured. Check console for more info.";
+    } finally {
+      importButton.removeAttribute("disabled");
+    }
+  };
+
+  exportButton.onclick = async () => {
+    exportButton.setAttribute("disabled", "");
+    errorText.innerHTML = "";
+
+    try {
+      // TODO
+    } catch (err) {
+      console.log(err);
+    } finally {
+      exportButton.removeAttribute("disabled");
+    }
+
+    parent.postMessage(
+      { pluginMessage: { type: "export-to-github", body } },
+      "*"
+    );
+  };
+</script>
