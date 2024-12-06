@@ -79,15 +79,9 @@ figma.ui.onmessage = async (msg: Message) => {
   // One way of distinguishing between different types of messages sent from
   // your HTML page is to use an object with a "type" property like this.
 
-  console.log("onmessage", msg);
-
   switch (msg.type) {
     case "test":
-      // createPullRequest(msg.token, msg.owner, msg.repo, msg.branch);
-
-      // testPushToBranch(msg.token, msg.owner, msg.repo, msg.branch, msg.path);
-
-      // testGetPrs(msg.token, msg.owner, msg.repo);
+      // use for testing
       break;
 
     case "import-to-figma":
@@ -132,8 +126,7 @@ figma.ui.onmessage = async (msg: Message) => {
 
     case "IMPORT":
       {
-        const { fileName, body } = msg;
-        importJSONFile({ fileName, body });
+        importJSONFile(msg.fileName, msg.body);
       }
       break;
 
@@ -153,264 +146,8 @@ figma.ui.onmessage = async (msg: Message) => {
   // figma.closePlugin();
 };
 
-async function createPullRequest(
-  token: string,
-  owner: string,
-  repo: string,
-  branchName: string
-) {
-  figma.ui.postMessage({ type: "log", message: "creating Pull Request" });
-
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github.v3+json",
-    "Content-Type": "application/json",
-  };
-
-  const createPr = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/pulls`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        title: "Figma: Update design token",
-        body: "Automated via Figma Plugin",
-        head: branchName,
-        base: "main",
-      }),
-    }
-  );
-
-  const body = await createPr.json();
-
-  if (!createPr.ok) {
-    figma.ui.postMessage({
-      type: "log",
-      message: "Failed to create PR. Is it already created?",
-    });
-
-    return;
-  }
-
-  figma.ui.postMessage({
-    type: "log",
-    message: `Created PR for branch: ${branchName}`,
-  });
-
-  // Attach label
-
-  const issueNumber = body.number;
-  const labels = ["Type: Design Token"];
-
-  const updatePr = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        labels,
-      }),
-    }
-  );
-
-  if (!updatePr.ok) {
-    const json = await updatePr.json();
-    console.log(json);
-    return;
-  }
-
-  figma.ui.postMessage({
-    type: "log",
-    message: `Added label: ${labels}`,
-  });
-}
-
-async function getLatestMainBranchSha(
-  token: string,
-  owner: string,
-  repo: string
-) {
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github.v3+json",
-    "Content-Type": "application/json",
-  };
-
-  figma.ui.postMessage({ type: "log", message: "getting main SHA" });
-
-  const mainRef = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/main`,
-    { headers }
-  );
-  const mainData = await mainRef.json();
-  const mainSHA = mainData.object.sha;
-
-  return mainSHA;
-}
-
-async function isBranchExist(
-  token: string,
-  owner: string,
-  repo: string,
-  branchName: string
-) {
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github.v3+json",
-    "Content-Type": "application/json",
-  };
-
-  figma.ui.postMessage({ type: "log", message: "checking existing branch" });
-
-  const existingBranch = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/branches/${branchName}`,
-    {
-      method: "GET",
-      headers,
-    }
-  );
-
-  return existingBranch.status === 200;
-}
-
-async function getDesignTokenFile(
-  token: string,
-  owner: string,
-  repo: string,
-  branchName: string,
-  designTokenPath: string
-) {
-  console.log("###", branchName, designTokenPath);
-
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github.v3+json",
-    "Content-Type": "application/json",
-  };
-
-  figma.ui.postMessage({ type: "log", message: "checking existing file" });
-
-  const existingFile = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${designTokenPath}?ref=${branchName}`,
-    {
-      method: "GET",
-      headers,
-      cache: "no-cache",
-    }
-  );
-
-  return existingFile;
-}
-
-async function pushToBranch(
-  token: string,
-  owner: string,
-  repo: string,
-  branchName: string,
-  designTokenPath: string,
-  content: Record<string, unknown>
-) {
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github.v3+json",
-    "Content-Type": "application/json",
-  };
-
-  // ==================================================
-
-  const mainSHA = await getLatestMainBranchSha(token, owner, repo);
-
-  // ==================================================
-
-  const branchExists = await isBranchExist(token, owner, repo, branchName);
-
-  if (!branchExists) {
-    figma.ui.postMessage({
-      type: "log",
-      message: `creating new branch: ${branchName}`,
-    });
-
-    const createBranch = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/git/refs`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          ref: `refs/heads/${branchName}`,
-          sha: mainSHA,
-        }),
-      }
-    );
-
-    if (!createBranch.ok) {
-      throw new Error(`Failed to create branch: ${await createBranch.text()}`);
-    }
-  }
-
-  // ==================================================
-
-  const existingFile = await getDesignTokenFile(
-    token,
-    owner,
-    repo,
-    branchName,
-    designTokenPath
-  );
-
-  // Note: We only want to update existing Design Tokens.
-  // If we want to create new design tokens, do it in a separate action.
-  if (existingFile.status === 200) {
-    figma.ui.postMessage({ type: "log", message: `committing file update` });
-    const json = await existingFile.json();
-
-    const createFile = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${designTokenPath}`,
-      {
-        method: "PUT",
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${token}`,
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-        body: JSON.stringify({
-          message: "Design token update",
-          content: encode(content),
-          branch: branchName,
-          sha: json.sha,
-        }),
-      }
-    );
-
-    if (!createFile.ok) {
-      const json = await createFile.json();
-      console.log(json);
-      throw new Error(`Failed to create file: ${await createFile.text()}`);
-    }
-  }
-}
-
-async function _testGetPrs(token: string, owner: string, repo: string) {
-  const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/pulls`,
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github.v3+json",
-        "Content-Type": "application/json",
-      },
-      body: undefined,
-    }
-  );
-
-  const data = await res.json();
-
-  if (res.status !== 200) {
-    throw { res, data };
-  }
-
-  console.log(data);
-}
+// ==================================================
+// Import
 
 async function fetchDesignTokensFromRepo(
   token: string,
@@ -476,6 +213,9 @@ async function applyDesignTokensToFigma(
   });
   processAliases({ collection, modeId, aliases, tokens });
 }
+
+// ==================================================
+// Export
 
 async function getVariablesFromFigma(): Promise<VariableCollection[]> {
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
@@ -568,6 +308,242 @@ async function convertToDesignToken(collection: VariableCollection) {
   };
 }
 
+async function pushToBranch(
+  token: string,
+  owner: string,
+  repo: string,
+  branchName: string,
+  designTokenPath: string,
+  content: Record<string, unknown>
+) {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github.v3+json",
+    "Content-Type": "application/json",
+  };
+
+  // ==================================================
+
+  const mainSHA = await getLatestMainBranchSha(token, owner, repo);
+
+  // ==================================================
+
+  const branchExists = await isBranchExist(token, owner, repo, branchName);
+
+  if (!branchExists) {
+    figma.ui.postMessage({
+      type: "log",
+      message: `creating new branch: ${branchName}`,
+    });
+
+    const createBranch = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/git/refs`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ref: `refs/heads/${branchName}`,
+          sha: mainSHA,
+        }),
+      }
+    );
+
+    if (!createBranch.ok) {
+      throw new Error(`Failed to create branch: ${await createBranch.text()}`);
+    }
+  }
+
+  // ==================================================
+
+  const existingFile = await getDesignTokenFile(
+    token,
+    owner,
+    repo,
+    branchName,
+    designTokenPath
+  );
+
+  // Note: We only want to update existing Design Tokens.
+  // If we want to create new design tokens, do it in a separate action.
+  if (existingFile.status === 200) {
+    figma.ui.postMessage({ type: "log", message: `committing file update` });
+    const json = await existingFile.json();
+
+    const createFile = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${designTokenPath}`,
+      {
+        method: "PUT",
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify({
+          message: "Design token update",
+          content: encode(content),
+          branch: branchName,
+          sha: json.sha,
+        }),
+      }
+    );
+
+    if (!createFile.ok) {
+      const json = await createFile.json();
+      console.log(json);
+      throw new Error(`Failed to create file: ${await createFile.text()}`);
+    }
+  }
+}
+
+async function getLatestMainBranchSha(
+  token: string,
+  owner: string,
+  repo: string
+) {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github.v3+json",
+    "Content-Type": "application/json",
+  };
+
+  figma.ui.postMessage({ type: "log", message: "getting main SHA" });
+
+  const mainRef = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/main`,
+    { headers }
+  );
+  const mainData = await mainRef.json();
+  const mainSHA = mainData.object.sha;
+
+  return mainSHA;
+}
+
+async function isBranchExist(
+  token: string,
+  owner: string,
+  repo: string,
+  branchName: string
+) {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github.v3+json",
+    "Content-Type": "application/json",
+  };
+
+  figma.ui.postMessage({ type: "log", message: "checking existing branch" });
+
+  const existingBranch = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/branches/${branchName}`,
+    {
+      method: "GET",
+      headers,
+    }
+  );
+
+  return existingBranch.status === 200;
+}
+
+async function getDesignTokenFile(
+  token: string,
+  owner: string,
+  repo: string,
+  branchName: string,
+  designTokenPath: string
+) {
+  console.log("###", branchName, designTokenPath);
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github.v3+json",
+    "Content-Type": "application/json",
+  };
+
+  figma.ui.postMessage({ type: "log", message: "checking existing file" });
+
+  const existingFile = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${designTokenPath}?ref=${branchName}`,
+    {
+      method: "GET",
+      headers,
+      cache: "no-cache",
+    }
+  );
+
+  return existingFile;
+}
+
+async function createPullRequest(
+  token: string,
+  owner: string,
+  repo: string,
+  branchName: string
+) {
+  figma.ui.postMessage({ type: "log", message: "creating Pull Request" });
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github.v3+json",
+    "Content-Type": "application/json",
+  };
+
+  const createPr = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        title: "Figma: Update design token",
+        body: "Automated via Figma Plugin",
+        head: branchName,
+        base: "main",
+      }),
+    }
+  );
+
+  const body = await createPr.json();
+
+  if (!createPr.ok) {
+    figma.ui.postMessage({
+      type: "log",
+      message: "Failed to create PR. Is it already created?",
+    });
+
+    return;
+  }
+
+  figma.ui.postMessage({
+    type: "log",
+    message: `Created PR for branch: ${branchName}`,
+  });
+
+  // Attach label
+
+  const issueNumber = body.number;
+  const labels = ["Type: Design Token"];
+
+  const updatePr = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        labels,
+      }),
+    }
+  );
+
+  if (!updatePr.ok) {
+    const json = await updatePr.json();
+    console.log(json);
+    return;
+  }
+
+  figma.ui.postMessage({
+    type: "log",
+    message: `Added label: ${labels}`,
+  });
+}
+
 function isColor(
   x: unknown,
   resolvedType: VariableResolvedDataType
@@ -615,32 +591,27 @@ function encode(obj: unknown) {
   return base64;
 }
 
-// =====
+function rgbToHex({ r, g, b, a }: RGBA) {
+  if (a !== 1) {
+    return `rgba(${[r, g, b]
+      .map((n) => Math.round(n * 255))
+      .join(", ")}, ${a.toFixed(4)})`;
+  }
+  const toHex = (value: number) => {
+    const hex = Math.round(value * 255).toString(16);
+    return hex.length === 1 ? "0" + hex : hex;
+  };
+
+  const hex = [toHex(r), toHex(g), toHex(b)].join("");
+  return `#${hex}`;
+}
+
+// ==================================================
+// Reference
 // Below is copy-pasted from https://github.com/figma/plugin-samples/tree/master/variables-import-export
 
-console.clear();
-
-function createCollection(name) {
-  const collection = figma.variables.createVariableCollection(name);
-  const modeId = collection.modes[0].modeId;
-  return { collection, modeId };
-}
-
-function createToken(collection, modeId, type, name, value) {
-  const token = figma.variables.createVariable(name, collection, type);
-  token.setValueForMode(modeId, value);
-  return token;
-}
-
-function createVariable(collection, modeId, key, valueKey, tokens) {
-  const token = tokens[valueKey];
-  return createToken(collection, modeId, token.resolvedType, key, {
-    type: "VARIABLE_ALIAS",
-    id: `${token.id}`,
-  });
-}
-
-function importJSONFile({ fileName, body }) {
+function importJSONFile(fileName: string, body: string) {
+  console.log("importJSONFile", fileName, body);
   const json = JSON.parse(body);
   const { collection, modeId } = createCollection(fileName);
   const aliases = {};
@@ -659,24 +630,14 @@ function importJSONFile({ fileName, body }) {
   processAliases({ collection, modeId, aliases, tokens });
 }
 
-function processAliases({ collection, modeId, aliases, tokens }) {
-  aliases = Object.values(aliases);
-  let generations = aliases.length;
-  while (aliases.length && generations > 0) {
-    for (let i = 0; i < aliases.length; i++) {
-      const { key, type, valueKey } = aliases[i];
-      const token = tokens[valueKey];
-      if (token) {
-        aliases.splice(i, 1);
-        tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
-      }
-    }
-    generations--;
-  }
-}
-
 function isAlias(value) {
   return value.toString().trim().charAt(0) === "{";
+}
+
+function createCollection(name) {
+  const collection = figma.variables.createVariableCollection(name);
+  const modeId = collection.modes[0].modeId;
+  return { collection, modeId };
 }
 
 function traverseToken({
@@ -744,84 +705,37 @@ function traverseToken({
   }
 }
 
-// async function exportToJSON() {
-//   const collections = await figma.variables.getLocalVariableCollectionsAsync();
-//   const files = [];
-//   for (const collection of collections) {
-//     files.push(...(await processCollection(collection)));
-//   }
-//   figma.ui.postMessage({ type: "EXPORT_RESULT", files });
-// }
-
-// async function processCollection({ name, modes, variableIds }) {
-//   const files = [];
-//   for (const mode of modes) {
-//     const file = { fileName: `${name}.${mode.name}.tokens.json`, body: {} };
-//     for (const variableId of variableIds) {
-//       const { name, resolvedType, valuesByMode } =
-//         await figma.variables.getVariableByIdAsync(variableId);
-//       const value = valuesByMode[mode.modeId];
-//       if (value !== undefined && ["COLOR", "FLOAT"].includes(resolvedType)) {
-//         let obj = file.body;
-//         name.split("/").forEach((groupName) => {
-//           obj[groupName] = obj[groupName] || {};
-//           obj = obj[groupName];
-//         });
-//         obj.$type = resolvedType === "COLOR" ? "color" : "number";
-//         if (value.type === "VARIABLE_ALIAS") {
-//           const currentVar = await figma.variables.getVariableByIdAsync(
-//             value.id
-//           );
-//           obj.$value = `{${currentVar.name.replace(/\//g, ".")}}`;
-//         } else {
-//           obj.$value = resolvedType === "COLOR" ? rgbToHex(value) : value;
-//         }
-//       }
-//     }
-//     files.push(file);
-//   }
-//   return files;
-// }
-
-// figma.ui.onmessage = async (e) => {
-//   console.log("code received message", e);
-//   if (e.type === "IMPORT") {
-//     const { fileName, body } = e;
-//     importJSONFile({ fileName, body });
-//   } else if (e.type === "EXPORT") {
-//     await exportToJSON();
-//   }
-// };
-// if (figma.command === "import") {
-//   figma.showUI(__uiFiles__["import"], {
-//     width: 500,
-//     height: 500,
-//     themeColors: true,
-//   });
-// } else if (figma.command === "export") {
-//   figma.showUI(__uiFiles__["export"], {
-//     width: 500,
-//     height: 500,
-//     themeColors: true,
-//   });
-// }
-
-function rgbToHex({ r, g, b, a }: RGBA) {
-  if (a !== 1) {
-    return `rgba(${[r, g, b]
-      .map((n) => Math.round(n * 255))
-      .join(", ")}, ${a.toFixed(4)})`;
+function processAliases({ collection, modeId, aliases, tokens }) {
+  aliases = Object.values(aliases);
+  let generations = aliases.length;
+  while (aliases.length && generations > 0) {
+    for (let i = 0; i < aliases.length; i++) {
+      const { key, type, valueKey } = aliases[i];
+      const token = tokens[valueKey];
+      if (token) {
+        aliases.splice(i, 1);
+        tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
+      }
+    }
+    generations--;
   }
-  const toHex = (value: number) => {
-    const hex = Math.round(value * 255).toString(16);
-    return hex.length === 1 ? "0" + hex : hex;
-  };
-
-  const hex = [toHex(r), toHex(g), toHex(b)].join("");
-  return `#${hex}`;
 }
 
-function parseColor(color) {
+function createToken(collection, modeId, type, name, value) {
+  const token = figma.variables.createVariable(name, collection, type);
+  token.setValueForMode(modeId, value);
+  return token;
+}
+
+function createVariable(collection, modeId, key, valueKey, tokens) {
+  const token = tokens[valueKey];
+  return createToken(collection, modeId, token.resolvedType, key, {
+    type: "VARIABLE_ALIAS",
+    id: `${token.id}`,
+  });
+}
+
+function parseColor(color: string) {
   color = color.trim();
   const rgbRegex = /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/;
   const rgbaRegex =
@@ -831,13 +745,15 @@ function parseColor(color) {
     /^hsla\(\s*(\d{1,3})\s*,\s*(\d{1,3})%\s*,\s*(\d{1,3})%\s*,\s*([\d.]+)\s*\)$/;
   const hexRegex = /^#([A-Fa-f0-9]{3}){1,2}$/;
   const floatRgbRegex =
-    /^\{\s*r:\s*[\d\.]+,\s*g:\s*[\d\.]+,\s*b:\s*[\d\.]+(,\s*opacity:\s*[\d\.]+)?\s*\}$/;
+    /^\{\s*r:\s*[\d.]+,\s*g:\s*[\d.]+,\s*b:\s*[\d.]+(,\s*opacity:\s*[\d.]+)?\s*\}$/;
+
+  type regexRGBA = string[];
 
   if (rgbRegex.test(color)) {
-    const [, r, g, b] = color.match(rgbRegex);
+    const [, r, g, b] = color.match(rgbRegex) as regexRGBA;
     return { r: parseInt(r) / 255, g: parseInt(g) / 255, b: parseInt(b) / 255 };
   } else if (rgbaRegex.test(color)) {
-    const [, r, g, b, a] = color.match(rgbaRegex);
+    const [, r, g, b, a] = color.match(rgbaRegex) as regexRGBA;
     return {
       r: parseInt(r) / 255,
       g: parseInt(g) / 255,
@@ -845,10 +761,10 @@ function parseColor(color) {
       a: parseFloat(a),
     };
   } else if (hslRegex.test(color)) {
-    const [, h, s, l] = color.match(hslRegex);
+    const [, h, s, l] = color.match(hslRegex) as regexRGBA;
     return hslToRgbFloat(parseInt(h), parseInt(s) / 100, parseInt(l) / 100);
   } else if (hslaRegex.test(color)) {
-    const [, h, s, l, a] = color.match(hslaRegex);
+    const [, h, s, l, a] = color.match(hslaRegex) as regexRGBA;
     return Object.assign(
       hslToRgbFloat(parseInt(h), parseInt(s) / 100, parseInt(l) / 100),
       { a: parseFloat(a) }
@@ -874,8 +790,8 @@ function parseColor(color) {
   }
 }
 
-function hslToRgbFloat(h, s, l) {
-  const hue2rgb = (p, q, t) => {
+function hslToRgbFloat(h: number, s: number, l: number) {
+  const hue2rgb = (p: number, q: number, t: number) => {
     if (t < 0) t += 1;
     if (t > 1) t -= 1;
     if (t < 1 / 6) return p + (q - p) * 6 * t;
