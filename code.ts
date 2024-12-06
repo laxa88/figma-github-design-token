@@ -1,3 +1,9 @@
+type MessageDemo = {
+  type: "IMPORT" | "EXPORT";
+  fileName: string;
+  body: string;
+};
+
 type MessageTest = {
   type: "test";
   token: string;
@@ -25,7 +31,7 @@ type MessageExport = {
   branchName: string; // TODO: for creating PR
 };
 
-type Message = MessageTest | MessageImport | MessageExport;
+type Message = MessageDemo | MessageTest | MessageImport | MessageExport;
 
 console.clear();
 
@@ -38,10 +44,33 @@ console.clear();
 // full browser environment (See https://www.figma.com/plugin-docs/how-plugins-run).
 
 // This shows the HTML page in "ui.html".
-figma.showUI(__html__, {
-  width: 400,
-  height: 200,
-});
+// figma.showUI(__html__, {
+//   width: 400,
+//   height: 200,
+// });
+switch (figma.command) {
+  case "import":
+    figma.showUI(__uiFiles__["import"], {
+      width: 500,
+      height: 500,
+    });
+    break;
+
+  case "export":
+    figma.showUI(__uiFiles__["export"], {
+      width: 500,
+      height: 500,
+      themeColors: true,
+    });
+    break;
+
+  default:
+    figma.showUI(__uiFiles__["ui"], {
+      width: 400,
+      height: 300,
+    });
+    break;
+}
 
 // Calls to "parent.postMessage" from within the HTML page will trigger this
 // callback. The callback will be passed the "pluginMessage" property of the
@@ -56,7 +85,7 @@ figma.ui.onmessage = async (msg: Message) => {
     case "test":
       // createPullRequest(msg.token, msg.owner, msg.repo, msg.branch);
 
-      testPushToBranch(msg.token, msg.owner, msg.repo, msg.branch, msg.path);
+      // testPushToBranch(msg.token, msg.owner, msg.repo, msg.branch, msg.path);
 
       // testGetPrs(msg.token, msg.owner, msg.repo);
       break;
@@ -82,21 +111,37 @@ figma.ui.onmessage = async (msg: Message) => {
       {
         const variables = await getVariablesFromFigma();
 
-        const designTokens = convertToDesignTokens(variables);
+        const designTokens = await convertToDesignTokens(variables);
 
-        await exportDesignTokensToGithub(
+        await pushToBranch(
           msg.token,
           msg.owner,
           msg.repo,
+          msg.branch,
           msg.path,
           designTokens
         );
+
+        await createPullRequest(msg.token, msg.owner, msg.repo, msg.branch);
 
         figma.ui.postMessage({
           type: "export-to-github",
         });
       }
       break;
+
+    case "IMPORT":
+      {
+        const { fileName, body } = msg;
+        importJSONFile({ fileName, body });
+      }
+      break;
+
+    // case "EXPORT":
+    //   {
+    //     await exportToJSON();
+    //   }
+    //   break;
 
     default:
       console.error("Unknown message type:", msg);
@@ -257,12 +302,13 @@ async function getDesignTokenFile(
   return existingFile;
 }
 
-async function testPushToBranch(
+async function pushToBranch(
   token: string,
   owner: string,
   repo: string,
   branchName: string,
-  designTokenPath: string
+  designTokenPath: string,
+  content: Record<string, unknown>
 ) {
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -328,7 +374,7 @@ async function testPushToBranch(
         },
         body: JSON.stringify({
           message: "Design token update",
-          content: encode({ foo: "update" }),
+          content: encode(content),
           branch: branchName,
           sha: json.sha,
         }),
@@ -410,66 +456,134 @@ async function fetchDesignTokensFromRepo(
 }
 
 async function applyDesignTokensToFigma(
-  _designTokens: Record<string, string>
+  json: Record<string, string>
 ): Promise<void> {
-  throw "unimplemented";
+  console.log("applyDesignTokensToFigma", json);
+
+  const { collection, modeId } = createCollection("dummy");
+  const aliases = {};
+  const tokens = {};
+  Object.entries(json).forEach(([key, object]) => {
+    traverseToken({
+      collection,
+      modeId,
+      type: json.$type,
+      key,
+      object,
+      tokens,
+      aliases,
+    });
+  });
+  processAliases({ collection, modeId, aliases, tokens });
 }
 
-async function getVariablesFromFigma(): Promise<Record<string, string>> {
-  // Flow: Get data from github repo's JSON file
+async function getVariablesFromFigma(): Promise<VariableCollection[]> {
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
 
-  const localCollections =
-    await figma.variables.getLocalVariableCollectionsAsync();
+  for (const collection of collections) {
+    if (collection.modes.length > 1) {
+      const name = collection.name;
+      figma.ui.postMessage({
+        type: "log",
+        message: `Collection "${name}" has more than one mode. Design Tokens currently does not support modes. Please split the modes into separate collections instead and try again.`,
+      });
+    }
+  }
 
-  console.log("collections", localCollections);
-
-  const collection = await figma.variables.getVariableCollectionByIdAsync(
-    localCollections[0].id
-  );
-
-  console.log("collection", collection);
-
-  const vars1 = await figma.variables.getLocalVariablesAsync("BOOLEAN");
-  const vars2 = await figma.variables.getLocalVariablesAsync("COLOR");
-  const vars3 = await figma.variables.getLocalVariablesAsync("FLOAT");
-  const vars4 = await figma.variables.getLocalVariablesAsync("STRING");
-
-  console.log(
-    "vars1",
-    vars1.map((i) => i.name)
-  );
-  console.log(
-    "vars2",
-    vars2.map((i) => i.name)
-  );
-  console.log(
-    "vars3",
-    vars3.map((i) => i.name)
-  );
-  console.log(
-    "vars4",
-    vars4.map((i) => i.name)
-  );
-
-  return {};
+  return collections;
 }
 
-function convertToDesignTokens(
-  variables: Record<string, string>
-): Record<string, string> {
-  // TODO
-
-  return {};
+async function convertToDesignTokens(
+  collections: VariableCollection[]
+): Promise<Record<string, string>> {
+  let files = {};
+  for (const collection of collections) {
+    const tokenObj = await convertToDesignToken(collection);
+    files = {
+      ...files,
+      ...tokenObj,
+    };
+  }
+  return files;
 }
 
-async function exportDesignTokensToGithub(
-  _token: string,
-  _owner: string,
-  _repo: string,
-  _path: string,
-  _designTokens: Record<string, string>
-) {
-  // TODO
+async function convertToDesignToken(collection: VariableCollection) {
+  const { name, modes, variableIds } = collection;
+
+  // Note: Design Token W3C does not support modes yet, so we assume is always length === 1
+  const mode = modes[0];
+
+  const body: Record<string, unknown> = {};
+
+  for (const variableId of variableIds) {
+    const variable = await figma.variables.getVariableByIdAsync(variableId);
+    if (!variable) {
+      continue;
+    }
+
+    const { name, resolvedType, valuesByMode } = variable;
+    const value = valuesByMode[mode.modeId];
+
+    if (
+      value !== undefined &&
+      ["COLOR", "FLOAT", "STRING"].includes(resolvedType)
+    ) {
+      let obj = body;
+
+      // Traverse to the last leaf in the path
+      name.split("/").forEach((groupName) => {
+        obj[groupName] = obj[groupName] || {};
+        obj = obj[groupName] as Record<string, unknown>;
+      });
+
+      // Notes:
+      // - W3C Design Tokens have strict types, but Figma only has string/float/color types.
+      // - For now, we follow Figma types and store them in W3C JSON format, but using custom $type.
+
+      if (isVariableAlias(value)) {
+        const currentVar = await figma.variables.getVariableByIdAsync(value.id);
+        obj.$type = isColor(value, currentVar?.resolvedType || "STRING")
+          ? "color"
+          : isNumber(value, currentVar?.resolvedType || "STRING")
+          ? "number"
+          : "string";
+        obj.$value = `{${currentVar?.name.replace(/\//g, ".")}}`;
+      } else {
+        if (isColor(value, resolvedType)) {
+          obj.$type = "color";
+          obj.$value = rgbToHex(value);
+        } else if (isNumber(value, resolvedType)) {
+          obj.$type = "number";
+          obj.$value = value;
+        } else {
+          obj.$type = "string";
+          obj.$value = value;
+        }
+      }
+    }
+  }
+
+  return {
+    [name]: body,
+  };
+}
+
+function isColor(
+  x: unknown,
+  resolvedType: VariableResolvedDataType
+): x is RGBA {
+  return resolvedType === "COLOR";
+}
+
+function isNumber(
+  x: unknown,
+  resolvedType: VariableResolvedDataType
+): x is number {
+  return resolvedType === "FLOAT";
+}
+
+function isVariableAlias(x: unknown): x is VariableAlias {
+  return (x as VariableAlias).type === "VARIABLE_ALIAS";
 }
 
 // Workaround:
@@ -477,7 +591,7 @@ async function exportDesignTokensToGithub(
 // - Figma Plugin has `base64Encode(Uint8Array): string` but we need to provide a JSON object.
 // - As a workaround, we write the encoding implementation manually here.
 function encode(obj: unknown) {
-  const str = JSON.stringify(obj);
+  const str = JSON.stringify(obj, null, 2);
   let binary = "";
   for (let i = 0; i < str.length; i++) {
     binary += String.fromCharCode(str.charCodeAt(i) & 0xff);
@@ -503,6 +617,8 @@ function encode(obj: unknown) {
 
 // =====
 // Below is copy-pasted from https://github.com/figma/plugin-samples/tree/master/variables-import-export
+
+console.clear();
 
 function createCollection(name) {
   const collection = figma.variables.createVariableCollection(name);
@@ -628,44 +744,44 @@ function traverseToken({
   }
 }
 
-async function exportToJSON() {
-  const collections = await figma.variables.getLocalVariableCollectionsAsync();
-  const files = [];
-  for (const collection of collections) {
-    files.push(...(await processCollection(collection)));
-  }
-  figma.ui.postMessage({ type: "EXPORT_RESULT", files });
-}
+// async function exportToJSON() {
+//   const collections = await figma.variables.getLocalVariableCollectionsAsync();
+//   const files = [];
+//   for (const collection of collections) {
+//     files.push(...(await processCollection(collection)));
+//   }
+//   figma.ui.postMessage({ type: "EXPORT_RESULT", files });
+// }
 
-async function processCollection({ name, modes, variableIds }) {
-  const files = [];
-  for (const mode of modes) {
-    const file = { fileName: `${name}.${mode.name}.tokens.json`, body: {} };
-    for (const variableId of variableIds) {
-      const { name, resolvedType, valuesByMode } =
-        await figma.variables.getVariableByIdAsync(variableId);
-      const value = valuesByMode[mode.modeId];
-      if (value !== undefined && ["COLOR", "FLOAT"].includes(resolvedType)) {
-        let obj = file.body;
-        name.split("/").forEach((groupName) => {
-          obj[groupName] = obj[groupName] || {};
-          obj = obj[groupName];
-        });
-        obj.$type = resolvedType === "COLOR" ? "color" : "number";
-        if (value.type === "VARIABLE_ALIAS") {
-          const currentVar = await figma.variables.getVariableByIdAsync(
-            value.id
-          );
-          obj.$value = `{${currentVar.name.replace(/\//g, ".")}}`;
-        } else {
-          obj.$value = resolvedType === "COLOR" ? rgbToHex(value) : value;
-        }
-      }
-    }
-    files.push(file);
-  }
-  return files;
-}
+// async function processCollection({ name, modes, variableIds }) {
+//   const files = [];
+//   for (const mode of modes) {
+//     const file = { fileName: `${name}.${mode.name}.tokens.json`, body: {} };
+//     for (const variableId of variableIds) {
+//       const { name, resolvedType, valuesByMode } =
+//         await figma.variables.getVariableByIdAsync(variableId);
+//       const value = valuesByMode[mode.modeId];
+//       if (value !== undefined && ["COLOR", "FLOAT"].includes(resolvedType)) {
+//         let obj = file.body;
+//         name.split("/").forEach((groupName) => {
+//           obj[groupName] = obj[groupName] || {};
+//           obj = obj[groupName];
+//         });
+//         obj.$type = resolvedType === "COLOR" ? "color" : "number";
+//         if (value.type === "VARIABLE_ALIAS") {
+//           const currentVar = await figma.variables.getVariableByIdAsync(
+//             value.id
+//           );
+//           obj.$value = `{${currentVar.name.replace(/\//g, ".")}}`;
+//         } else {
+//           obj.$value = resolvedType === "COLOR" ? rgbToHex(value) : value;
+//         }
+//       }
+//     }
+//     files.push(file);
+//   }
+//   return files;
+// }
 
 // figma.ui.onmessage = async (e) => {
 //   console.log("code received message", e);
@@ -676,14 +792,27 @@ async function processCollection({ name, modes, variableIds }) {
 //     await exportToJSON();
 //   }
 // };
+// if (figma.command === "import") {
+//   figma.showUI(__uiFiles__["import"], {
+//     width: 500,
+//     height: 500,
+//     themeColors: true,
+//   });
+// } else if (figma.command === "export") {
+//   figma.showUI(__uiFiles__["export"], {
+//     width: 500,
+//     height: 500,
+//     themeColors: true,
+//   });
+// }
 
-function rgbToHex({ r, g, b, a }) {
+function rgbToHex({ r, g, b, a }: RGBA) {
   if (a !== 1) {
     return `rgba(${[r, g, b]
       .map((n) => Math.round(n * 255))
       .join(", ")}, ${a.toFixed(4)})`;
   }
-  const toHex = (value) => {
+  const toHex = (value: number) => {
     const hex = Math.round(value * 255).toString(16);
     return hex.length === 1 ? "0" + hex : hex;
   };
