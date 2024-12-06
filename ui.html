@@ -13,22 +13,59 @@
   <input id="repo" type="text" />
 </div>
 
+<div>
+  <label for="branch">Branch</label>
+  <input id="branch" type="text" />
+</div>
+
+<div>
+  <label for="path">Design Token file path</label>
+  <input id="path" type="text" />
+</div>
+
+<button id="testButton">Test</button>
 <button id="importButton">Import</button>
 <button id="exportButton">Export</button>
 <div id="errors"></div>
+<div id="logs"></div>
 
 <script>
   const tokenField = document.getElementById("token");
   const ownerField = document.getElementById("owner");
   const repoField = document.getElementById("repo");
+  const branchField = document.getElementById("branch");
+  const pathField = document.getElementById("path");
+
+  const testButton = document.getElementById("testButton");
   const importButton = document.getElementById("importButton");
   const exportButton = document.getElementById("exportButton");
   const errorText = document.getElementById("errors");
+  const logText = document.getElementById("logs");
+
+  let logs = [];
 
   // TODO: hard-code this if you need a default
   tokenField.value = "";
   ownerField.value = "";
   repoField.value = "";
+  branchField.value = "";
+  pathField.value = "";
+
+  testButton.onclick = async () => {
+    parent.postMessage(
+      {
+        pluginMessage: {
+          type: "test",
+          token: tokenField.value,
+          owner: ownerField.value,
+          repo: repoField.value,
+          branch: branchField.value,
+          path: pathField.value,
+        },
+      },
+      "*"
+    );
+  };
 
   importButton.onclick = async () => {
     importButton.setAttribute("disabled", "");
@@ -41,6 +78,7 @@
           token: tokenField.value,
           owner: ownerField.value,
           repo: repoField.value,
+          path: pathField.value,
         },
       },
       "*"
@@ -58,17 +96,28 @@
           token: tokenField.value,
           owner: ownerField.value,
           repo: repoField.value,
+          branch: branchField.value,
+          path: pathField.value,
         },
       },
       "*"
     );
   };
 
+  // This receives data from code.ts via postMessage
   window.onmessage = async (msg) => {
     const pluginMessage = msg.data.pluginMessage;
     console.log(pluginMessage);
 
     switch (pluginMessage.type) {
+      case "log":
+        logs.unshift(pluginMessage.message);
+        if (logs.length > 5) {
+          logs.pop();
+        }
+        logText.innerHTML = logs.join("</br>");
+        break;
+
       case "import-to-figma":
         // TODO: handle error
         importButton.removeAttribute("disabled");
