@@ -844,17 +844,27 @@ function processAliases(
   const aliases = Object.values(tokenAliases);
 
   for (let i = 0; i < aliases.length; i++) {
+    // key = "fg/default"
+    // valueKey = "core/colors/white"
     const { key, valueKey } = aliases[i];
+
+    // collectionName = "core"
+    // tokenKey = "colors/white"
     const [collectionName, ...otherValueKeys] = valueKey.split("/");
     const tokenKey = otherValueKeys.join("/");
     const tokens = tokenDict[collectionName];
     const token = tokens[tokenKey];
 
     if (token) {
-      aliases.splice(i, 1);
       tokens[key] = createVariable(collection, modeId, key, tokenKey, tokens);
     } else {
-      tokens[key] = createToken(collection, modeId, "STRING", key, tokenKey);
+      tokens[tokenKey] = createToken(
+        collection,
+        modeId,
+        "STRING",
+        key,
+        tokenKey
+      );
     }
   }
 }
