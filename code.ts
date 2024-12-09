@@ -326,8 +326,9 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
   // - note: this should behave like upsert. does not delete other collections.
 
   const githubCollections = Object.entries(json);
-
   console.log("from github:", githubCollections);
+
+  const fullTokenDict: Record<string, FigmaTokenDict> = {};
 
   for (let i = 0; i < githubCollections.length; i++) {
     const [collectionName, content] = githubCollections[i];
@@ -355,13 +356,20 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
 
     Object.entries(content as object).forEach(([key, object]) => {
       console.log("### top entry:", key, object);
+      // const keyWithParent = `${collection.name}/${key}`;
+      // traverseToken(collection, modeId, keyWithParent, object, tokens, aliases);
       traverseToken(collection, modeId, key, object, tokens, aliases);
     });
 
-    processAliases(collection, modeId, aliases, tokens);
+    fullTokenDict[collectionName] = tokens;
+
+    // processAliases(collection, modeId, aliases, tokens);
+    processAliases(collection, modeId, aliases, fullTokenDict);
     console.log("###done aliases:", aliases);
     console.log("###done tokens:", tokens);
   }
+
+  console.log("### fullTokenDict:", fullTokenDict);
 }
 
 // ================================================== Export
@@ -806,6 +814,8 @@ function traverseToken(
   tokens: FigmaTokenDict,
   aliases: TokenAliasDict
 ) {
+  console.log("traverseToken:", key);
+
   // if key is a meta field, move on
   if (key.charAt(0) === "$") {
     return;
@@ -822,6 +832,8 @@ function traverseToken(
         .trim()
         .replace(/\./g, "/")
         .replace(/[{}]/g, "");
+
+      console.log("=== var:", valueKey, key);
 
       if (tokens[valueKey]) {
         // console.log("=== var:", object);
@@ -857,7 +869,7 @@ function traverseToken(
         case "spacing":
         case "paragraphSpacing":
         case "fontSizes":
-          // console.log("====CREATE:", key, object);
+          // TODO: if the value is a string with "{", compute the referenced values
           tokens[key] = createToken(
             collection,
             modeId,
@@ -903,19 +915,30 @@ function processAliases(
   collection: VariableCollection,
   modeId: string,
   tokenAliases: TokenAliasDict,
-  tokens: FigmaTokenDict
+  // tokens: FigmaTokenDict
+  tokenDict: Record<string, FigmaTokenDict>
 ) {
   const aliases = Object.values(tokenAliases);
 
+  console.log("##### aliases", aliases);
+  console.log("##### tokenDict", tokenDict);
+
   for (let i = 0; i < aliases.length; i++) {
     const { key, valueKey } = aliases[i];
-    const token = tokens[valueKey];
-    console.log("### token", token);
+    const [collectionName, ...otherValueKeys] = valueKey.split("/");
+    const tokenKey = otherValueKeys.join("/");
+    const tokens = tokenDict[collectionName];
+    const token = tokens[tokenKey];
+
+    console.log("##### valueKey", valueKey);
+    console.log("##### tokenKey", tokenKey);
+    console.log("##### tokens", tokens);
+
     if (token) {
       aliases.splice(i, 1);
-      tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
+      tokens[key] = createVariable(collection, modeId, key, tokenKey, tokens);
     } else {
-      tokens[key] = createToken(collection, modeId, "STRING", key, valueKey);
+      tokens[key] = createToken(collection, modeId, "STRING", key, tokenKey);
     }
   }
 }
@@ -949,6 +972,8 @@ function createVariable(
   tokens: FigmaTokenDict
 ) {
   const token = tokens[valueKey];
+
+  console.log("create variable:", token);
 
   return createToken(collection, modeId, token.resolvedType, key, {
     type: "VARIABLE_ALIAS",
