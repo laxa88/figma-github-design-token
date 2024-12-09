@@ -21,6 +21,7 @@ type MessageImport = {
   token: string;
   owner: string;
   repo: string;
+  branch: string;
   path: string;
 };
 
@@ -45,13 +46,14 @@ type DtColor = {
   $value: string;
 };
 
-type DtDimension = {
-  $type: "dimension";
-  $value: {
-    value: number;
-    unit: "px" | "rem";
-  };
-};
+// Todo: Enable this W3C standard and remove from DtNumber
+// type DtDimension = {
+//   $type: "dimension";
+//   $value: {
+//     value: number;
+//     unit: "px" | "rem";
+//   };
+// };
 
 type DtFontFamily = {
   $type: "fontFamily";
@@ -96,7 +98,14 @@ type DtCubicBezier = {
 };
 
 type DtNumber = {
-  $type: "number";
+  $type:
+    | "number"
+    | "borderRadius"
+    | "borderWidth"
+    | "dimension"
+    | "spacing"
+    | "paragraphSpacing"
+    | "fontSizes";
   $value: number;
 };
 
@@ -115,7 +124,7 @@ type DtcStrokeStyle = {
 
 type DtItem =
   | DtColor
-  | DtDimension
+  // | DtDimension
   | DtFontFamily
   | DtFontWeight
   | DtDuration
@@ -197,6 +206,7 @@ figma.ui.onmessage = async (msg: Message) => {
           msg.token,
           msg.owner,
           msg.repo,
+          msg.branch,
           msg.path
         );
 
@@ -253,19 +263,20 @@ figma.ui.onmessage = async (msg: Message) => {
   // figma.closePlugin();
 };
 
-// ==================================================
-// Import
+// ================================================== Import
 
 async function fetchDesignTokensFromRepo(
   token: string,
   owner: string,
   repo: string,
+  branchName: string,
   path: string
 ): Promise<DtObject> {
   const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branchName}`,
     {
       method: "GET",
+      cache: "no-cache",
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github.v3+json",
@@ -295,6 +306,8 @@ async function fetchDesignTokensFromRepo(
     .map((byte) => String.fromCharCode(byte))
     .join("");
   const result = JSON.parse(jsonString);
+
+  console.log("Fetched from Github", result);
 
   return result;
 }
@@ -345,16 +358,13 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
       traverseToken(collection, modeId, key, object, tokens, aliases);
     });
 
-    console.log("### aliases:", aliases);
-    console.log("### tokens:", tokens);
-
-    // TODO: enable this
-    // processAliases({ collection, modeId, aliases, tokens });
+    processAliases(collection, modeId, aliases, tokens);
+    console.log("###done aliases:", aliases);
+    console.log("###done tokens:", tokens);
   }
 }
 
-// ==================================================
-// Export
+// ================================================== Export
 
 async function getVariablesFromFigma(): Promise<VariableCollection[]> {
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
@@ -387,7 +397,9 @@ async function convertToDesignTokens(
 }
 
 async function convertToDesignToken(collection: VariableCollection) {
-  const { name, modes, variableIds } = collection;
+  const { name: collectionName, modes, variableIds } = collection;
+
+  console.log("converting:", collectionName);
 
   // Note: Design Token W3C does not support modes yet, so we assume is always length === 1
   const mode = modes[0];
@@ -402,6 +414,8 @@ async function convertToDesignToken(collection: VariableCollection) {
 
     const { name, resolvedType, valuesByMode } = variable;
     const value = valuesByMode[mode.modeId];
+
+    // console.log("==>", name, resolvedType, value);
 
     if (
       value !== undefined &&
@@ -421,12 +435,29 @@ async function convertToDesignToken(collection: VariableCollection) {
 
       if (isVariableAlias(value)) {
         const currentVar = await figma.variables.getVariableByIdAsync(value.id);
-        obj.$type = isColor(value, currentVar?.resolvedType || "STRING")
+        if (!currentVar) {
+          continue;
+        }
+
+        const parentCollection =
+          await figma.variables.getVariableCollectionByIdAsync(
+            currentVar.variableCollectionId
+          );
+
+        const aliasParentCollectionName = parentCollection?.name
+          ? `${parentCollection?.name}.`
+          : "";
+
+        obj.$type = isColor(value, currentVar.resolvedType || "STRING")
           ? "color"
-          : isNumber(value, currentVar?.resolvedType || "STRING")
+          : isNumber(value, currentVar.resolvedType || "STRING")
           ? "number"
           : "string";
-        obj.$value = `{${currentVar?.name.replace(/\//g, ".")}}`;
+
+        obj.$value = `{${aliasParentCollectionName}${currentVar.name.replace(
+          /\//g,
+          "."
+        )}}`;
       } else {
         if (isColor(value, resolvedType)) {
           obj.$type = "color";
@@ -442,8 +473,10 @@ async function convertToDesignToken(collection: VariableCollection) {
     }
   }
 
+  console.log("DONE", body);
+
   return {
-    [name]: body,
+    [collectionName]: body,
   };
 }
 
@@ -745,7 +778,7 @@ function rgbToHex({ r, g, b, a }: RGBA) {
   return `#${hex}`;
 }
 
-// ==================================================
+// ================================================== Import
 
 function createCollection(name: string) {
   const collection = figma.variables.createVariableCollection(name);
@@ -783,10 +816,7 @@ function traverseToken(
   if (isItem(object) && object.$value !== undefined) {
     const type = object.$type;
 
-    console.log("process item 1", object);
-
     if (isString(object.$value) && isAlias(object.$value)) {
-      console.log("process item 2");
       // Handle aliases
       const valueKey = object.$value
         .trim()
@@ -794,10 +824,13 @@ function traverseToken(
         .replace(/[{}]/g, "");
 
       if (tokens[valueKey]) {
-        console.log("=== var:", object);
+        // console.log("=== var:", object);
         tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
       } else {
-        aliases[key] = {
+        // console.log("add alias to dict:", key, type, valueKey);
+        const keyWithParent = `${collection.name}/${key}`;
+        // const keyWithParent = key;
+        aliases[keyWithParent] = {
           key,
           type,
           valueKey,
@@ -805,7 +838,7 @@ function traverseToken(
       }
     } else {
       // Handle tokens
-      console.log("process item 3");
+      // console.log("proc:", object.$type);
       switch (object.$type) {
         case "color":
           tokens[key] = createToken(
@@ -818,12 +851,19 @@ function traverseToken(
           break;
 
         case "number":
+        case "borderRadius":
+        case "borderWidth":
+        case "dimension":
+        case "spacing":
+        case "paragraphSpacing":
+        case "fontSizes":
+          // console.log("====CREATE:", key, object);
           tokens[key] = createToken(
             collection,
             modeId,
             "FLOAT",
             key,
-            object.$value
+            Number(object.$value)
           );
           break;
 
@@ -837,13 +877,12 @@ function traverseToken(
               object.$value
             );
           } else {
-            console.warn(`Unhandled type: ${object.$type}`);
+            console.warn("Unhandled type", object);
           }
           break;
       }
     }
   } else {
-    console.log("???", object);
     Object.entries(object as object).forEach(([key2, object2]) => {
       // Only traverse if key is not a meta field like "$theme"
       if (key2.charAt(0) !== "$") {
@@ -860,21 +899,26 @@ function traverseToken(
   }
 }
 
-// function processAliases({ collection, modeId, aliases, tokens }) {
-//   aliases = Object.values(aliases);
-//   let generations = aliases.length;
-//   while (aliases.length && generations > 0) {
-//     for (let i = 0; i < aliases.length; i++) {
-//       const { key, type, valueKey } = aliases[i];
-//       const token = tokens[valueKey];
-//       if (token) {
-//         aliases.splice(i, 1);
-//         tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
-//       }
-//     }
-//     generations--;
-//   }
-// }
+function processAliases(
+  collection: VariableCollection,
+  modeId: string,
+  tokenAliases: TokenAliasDict,
+  tokens: FigmaTokenDict
+) {
+  const aliases = Object.values(tokenAliases);
+
+  for (let i = 0; i < aliases.length; i++) {
+    const { key, valueKey } = aliases[i];
+    const token = tokens[valueKey];
+    console.log("### token", token);
+    if (token) {
+      aliases.splice(i, 1);
+      tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
+    } else {
+      tokens[key] = createToken(collection, modeId, "STRING", key, valueKey);
+    }
+  }
+}
 
 function createToken(
   collection: VariableCollection,
@@ -883,9 +927,18 @@ function createToken(
   name: string,
   value: VariableValue
 ) {
-  const token = figma.variables.createVariable(name, collection, resolvedType);
-  token.setValueForMode(modeId, value);
-  return token;
+  try {
+    const token = figma.variables.createVariable(
+      name,
+      collection,
+      resolvedType
+    );
+    token.setValueForMode(modeId, value);
+    return token;
+  } catch (err) {
+    console.error(`createToken: ${collection.name}, ${name}, ${value}`);
+    throw err;
+  }
 }
 
 function createVariable(
