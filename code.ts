@@ -1,3 +1,6 @@
+// Reference
+// https://github.com/figma/plugin-samples/tree/master/variables-import-export
+
 type MessageDemo = {
   type: "IMPORT" | "EXPORT";
   fileName: string;
@@ -32,6 +35,110 @@ type MessageExport = {
 };
 
 type Message = MessageDemo | MessageTest | MessageImport | MessageExport;
+
+// ==================================================
+
+// Refer: https://tr.designtokens.org/format/#types
+
+type DtColor = {
+  $type: "color";
+  $value: string;
+};
+
+type DtDimension = {
+  $type: "dimension";
+  $value: {
+    value: number;
+    unit: "px" | "rem";
+  };
+};
+
+type DtFontFamily = {
+  $type: "fontFamily";
+  $value: string | string[];
+};
+
+type DtFontWeight = {
+  $type: "fontWeight";
+  $value:
+    | number
+    | "thin"
+    | "hairline"
+    | "extra-light"
+    | "ultra-light"
+    | "light"
+    | "normal"
+    | "regular"
+    | "book"
+    | "medium"
+    | "semi-bold"
+    | "demi-bold"
+    | "bold"
+    | "extra-bold"
+    | "ultra-bold"
+    | "black"
+    | "heavy"
+    | "extra-black"
+    | "ultra-black";
+};
+
+type DtDuration = {
+  $type: "duration";
+  $value: {
+    value: number;
+    unit: "ms" | "s";
+  };
+};
+
+type DtCubicBezier = {
+  $type: "cubicBezier";
+  $value: number[];
+};
+
+type DtNumber = {
+  $type: "number";
+  $value: number;
+};
+
+type DtcStrokeStyle = {
+  $type: "strokeStyle";
+  $value:
+    | "solid"
+    | "dashed"
+    | "dotted"
+    | "double"
+    | "groove"
+    | "ridge"
+    | "outset"
+    | "inset";
+};
+
+type DtItem =
+  | DtColor
+  | DtDimension
+  | DtFontFamily
+  | DtFontWeight
+  | DtDuration
+  | DtCubicBezier
+  | DtNumber
+  | DtcStrokeStyle;
+
+type FigmaTokenDict = Record<string, Variable>;
+
+type TokenAlias = {
+  key: string;
+  type: string;
+  valueKey: string;
+};
+type TokenAliasDict = Record<string, TokenAlias>;
+
+type DtObject =
+  | {
+      [x: string]: DtObject;
+    }
+  | DtItem;
+
+// ==================================================
 
 console.clear();
 
@@ -124,11 +231,11 @@ figma.ui.onmessage = async (msg: Message) => {
       }
       break;
 
-    case "IMPORT":
-      {
-        importJSONFile(msg.fileName, msg.body);
-      }
-      break;
+    // case "IMPORT":
+    //   {
+    //     importJSONFile(msg.fileName, msg.body);
+    //   }
+    //   break;
 
     // case "EXPORT":
     //   {
@@ -154,7 +261,7 @@ async function fetchDesignTokensFromRepo(
   owner: string,
   repo: string,
   path: string
-): Promise<Record<string, string>> {
+): Promise<DtObject> {
   const res = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
     {
@@ -192,26 +299,58 @@ async function fetchDesignTokensFromRepo(
   return result;
 }
 
-async function applyDesignTokensToFigma(
-  json: Record<string, string>
-): Promise<void> {
+async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
   console.log("applyDesignTokensToFigma", json);
 
-  const { collection, modeId } = createCollection("dummy");
-  const aliases = {};
-  const tokens = {};
-  Object.entries(json).forEach(([key, object]) => {
-    traverseToken({
-      collection,
-      modeId,
-      type: json.$type,
-      key,
-      object,
-      tokens,
-      aliases,
+  const existingCollections = await getVariablesFromFigma();
+
+  console.log("current collection:", existingCollections);
+
+  // TODO
+  // - for each collection in JSON:
+  //  - delete collection
+  //  - recreate collection
+  // - note: this should behave like upsert. does not delete other collections.
+
+  const githubCollections = Object.entries(json);
+
+  console.log("from github:", githubCollections);
+
+  for (let i = 0; i < githubCollections.length; i++) {
+    const [collectionName, content] = githubCollections[i];
+
+    if (collectionName.startsWith("$")) {
+      console.log("skip:", collectionName);
+      continue;
+    }
+
+    console.log("=== COLLECTION:", collectionName);
+
+    // If collection already exists locally, delete it
+    const existing = existingCollections.find((c) => c.name === collectionName);
+    if (existing) {
+      console.log("found, delete:", existing?.name);
+      existing.remove();
+    } else {
+      console.log("new:", collectionName);
+    }
+
+    // Create new collection
+    const { collection, modeId } = createCollection(collectionName);
+    const aliases: TokenAliasDict = {};
+    const tokens: FigmaTokenDict = {};
+
+    Object.entries(content as object).forEach(([key, object]) => {
+      console.log("### top entry:", key, object);
+      traverseToken(collection, modeId, key, object, tokens, aliases);
     });
-  });
-  processAliases({ collection, modeId, aliases, tokens });
+
+    console.log("### aliases:", aliases);
+    console.log("### tokens:", tokens);
+
+    // TODO: enable this
+    // processAliases({ collection, modeId, aliases, tokens });
+  }
 }
 
 // ==================================================
@@ -607,60 +746,55 @@ function rgbToHex({ r, g, b, a }: RGBA) {
 }
 
 // ==================================================
-// Reference
-// Below is copy-pasted from https://github.com/figma/plugin-samples/tree/master/variables-import-export
 
-function importJSONFile(fileName: string, body: string) {
-  console.log("importJSONFile", fileName, body);
-  const json = JSON.parse(body);
-  const { collection, modeId } = createCollection(fileName);
-  const aliases = {};
-  const tokens = {};
-  Object.entries(json).forEach(([key, object]) => {
-    traverseToken({
-      collection,
-      modeId,
-      type: json.$type,
-      key,
-      object,
-      tokens,
-      aliases,
-    });
-  });
-  processAliases({ collection, modeId, aliases, tokens });
-}
-
-function isAlias(value) {
-  return value.toString().trim().charAt(0) === "{";
-}
-
-function createCollection(name) {
+function createCollection(name: string) {
   const collection = figma.variables.createVariableCollection(name);
   const modeId = collection.modes[0].modeId;
   return { collection, modeId };
 }
 
-function traverseToken({
-  collection,
-  modeId,
-  type,
-  key,
-  object,
-  tokens,
-  aliases,
-}) {
-  type = type || object.$type;
+function isItem(x: unknown): x is DtItem {
+  return !!(x as DtItem).$type;
+}
+
+function isAlias(value: string) {
+  return value.toString().trim().charAt(0) === "{";
+}
+
+function isString(x: unknown): x is string {
+  return typeof x === "string";
+}
+
+function traverseToken(
+  collection: VariableCollection,
+  modeId: string,
+  key: string,
+  object: DtObject,
+  tokens: FigmaTokenDict,
+  aliases: TokenAliasDict
+) {
   // if key is a meta field, move on
   if (key.charAt(0) === "$") {
     return;
   }
-  if (object.$value !== undefined) {
-    if (isAlias(object.$value)) {
+
+  // If this is a token, then read the type and value.
+  // else this is a nested object, traverse into it.
+  if (isItem(object) && object.$value !== undefined) {
+    const type = object.$type;
+
+    console.log("process item 1", object);
+
+    if (isString(object.$value) && isAlias(object.$value)) {
+      console.log("process item 2");
+      // Handle aliases
       const valueKey = object.$value
         .trim()
         .replace(/\./g, "/")
-        .replace(/[\{\}]/g, "");
+        .replace(/[{}]/g, "");
+
       if (tokens[valueKey]) {
+        console.log("=== var:", object);
         tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
       } else {
         aliases[key] = {
@@ -669,73 +803,107 @@ function traverseToken({
           valueKey,
         };
       }
-    } else if (type === "color") {
-      tokens[key] = createToken(
-        collection,
-        modeId,
-        "COLOR",
-        key,
-        parseColor(object.$value)
-      );
-    } else if (type === "number") {
-      tokens[key] = createToken(
-        collection,
-        modeId,
-        "FLOAT",
-        key,
-        object.$value
-      );
     } else {
-      console.log("unsupported type", type, object);
+      // Handle tokens
+      console.log("process item 3");
+      switch (object.$type) {
+        case "color":
+          tokens[key] = createToken(
+            collection,
+            modeId,
+            "COLOR",
+            key,
+            parseColor(object.$value)
+          );
+          break;
+
+        case "number":
+          tokens[key] = createToken(
+            collection,
+            modeId,
+            "FLOAT",
+            key,
+            object.$value
+          );
+          break;
+
+        default:
+          if (isString(object.$value)) {
+            tokens[key] = createToken(
+              collection,
+              modeId,
+              "STRING",
+              key,
+              object.$value
+            );
+          } else {
+            console.warn(`Unhandled type: ${object.$type}`);
+          }
+          break;
+      }
     }
   } else {
-    Object.entries(object).forEach(([key2, object2]) => {
+    console.log("???", object);
+    Object.entries(object as object).forEach(([key2, object2]) => {
+      // Only traverse if key is not a meta field like "$theme"
       if (key2.charAt(0) !== "$") {
-        traverseToken({
+        traverseToken(
           collection,
           modeId,
-          type,
-          key: `${key}/${key2}`,
-          object: object2,
+          `${key}/${key2}`,
+          object2,
           tokens,
-          aliases,
-        });
+          aliases
+        );
       }
     });
   }
 }
 
-function processAliases({ collection, modeId, aliases, tokens }) {
-  aliases = Object.values(aliases);
-  let generations = aliases.length;
-  while (aliases.length && generations > 0) {
-    for (let i = 0; i < aliases.length; i++) {
-      const { key, type, valueKey } = aliases[i];
-      const token = tokens[valueKey];
-      if (token) {
-        aliases.splice(i, 1);
-        tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
-      }
-    }
-    generations--;
-  }
-}
+// function processAliases({ collection, modeId, aliases, tokens }) {
+//   aliases = Object.values(aliases);
+//   let generations = aliases.length;
+//   while (aliases.length && generations > 0) {
+//     for (let i = 0; i < aliases.length; i++) {
+//       const { key, type, valueKey } = aliases[i];
+//       const token = tokens[valueKey];
+//       if (token) {
+//         aliases.splice(i, 1);
+//         tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
+//       }
+//     }
+//     generations--;
+//   }
+// }
 
-function createToken(collection, modeId, type, name, value) {
-  const token = figma.variables.createVariable(name, collection, type);
+function createToken(
+  collection: VariableCollection,
+  modeId: string,
+  resolvedType: VariableResolvedDataType,
+  name: string,
+  value: VariableValue
+) {
+  const token = figma.variables.createVariable(name, collection, resolvedType);
   token.setValueForMode(modeId, value);
   return token;
 }
 
-function createVariable(collection, modeId, key, valueKey, tokens) {
+function createVariable(
+  collection: VariableCollection,
+  modeId: string,
+  key: string,
+  valueKey: string,
+  tokens: FigmaTokenDict
+) {
   const token = tokens[valueKey];
+
   return createToken(collection, modeId, token.resolvedType, key, {
     type: "VARIABLE_ALIAS",
     id: `${token.id}`,
   });
 }
 
-function parseColor(color: string) {
+function parseColor(color: string): RGB | RGBA {
   color = color.trim();
   const rgbRegex = /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/;
   const rgbaRegex =
@@ -786,7 +954,8 @@ function parseColor(color: string) {
   } else if (floatRgbRegex.test(color)) {
     return JSON.parse(color);
   } else {
-    throw new Error("Invalid color format");
+    console.warn(`Unhandled color format: ${color}`);
+    return { r: 0, g: 0, b: 0 };
   }
 }
 
