@@ -160,33 +160,10 @@ console.clear();
 // full browser environment (See https://www.figma.com/plugin-docs/how-plugins-run).
 
 // This shows the HTML page in "ui.html".
-// figma.showUI(__html__, {
-//   width: 400,
-//   height: 200,
-// });
-switch (figma.command) {
-  case "import":
-    figma.showUI(__uiFiles__["import"], {
-      width: 500,
-      height: 500,
-    });
-    break;
-
-  case "export":
-    figma.showUI(__uiFiles__["export"], {
-      width: 500,
-      height: 500,
-      themeColors: true,
-    });
-    break;
-
-  default:
-    figma.showUI(__uiFiles__["ui"], {
-      width: 400,
-      height: 300,
-    });
-    break;
-}
+figma.showUI(__html__, {
+  width: 400,
+  height: 200,
+});
 
 // Calls to "parent.postMessage" from within the HTML page will trigger this
 // callback. The callback will be passed the "pluginMessage" property of the
@@ -240,18 +217,6 @@ figma.ui.onmessage = async (msg: Message) => {
         });
       }
       break;
-
-    // case "IMPORT":
-    //   {
-    //     importJSONFile(msg.fileName, msg.body);
-    //   }
-    //   break;
-
-    // case "EXPORT":
-    //   {
-    //     await exportToJSON();
-    //   }
-    //   break;
 
     default:
       console.error("Unknown message type:", msg);
@@ -307,26 +272,13 @@ async function fetchDesignTokensFromRepo(
     .join("");
   const result = JSON.parse(jsonString);
 
-  console.log("Fetched from Github", result);
-
   return result;
 }
 
 async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
-  console.log("applyDesignTokensToFigma", json);
-
   const existingCollections = await getVariablesFromFigma();
 
-  console.log("current collection:", existingCollections);
-
-  // TODO
-  // - for each collection in JSON:
-  //  - delete collection
-  //  - recreate collection
-  // - note: this should behave like upsert. does not delete other collections.
-
   const githubCollections = Object.entries(json);
-  console.log("from github:", githubCollections);
 
   const fullTokenDict: Record<string, FigmaTokenDict> = {};
 
@@ -334,19 +286,13 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
     const [collectionName, content] = githubCollections[i];
 
     if (collectionName.startsWith("$")) {
-      console.log("skip:", collectionName);
       continue;
     }
-
-    console.log("=== COLLECTION:", collectionName);
 
     // If collection already exists locally, delete it
     const existing = existingCollections.find((c) => c.name === collectionName);
     if (existing) {
-      console.log("found, delete:", existing?.name);
       existing.remove();
-    } else {
-      console.log("new:", collectionName);
     }
 
     // Create new collection
@@ -355,21 +301,13 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
     const tokens: FigmaTokenDict = {};
 
     Object.entries(content as object).forEach(([key, object]) => {
-      console.log("### top entry:", key, object);
-      // const keyWithParent = `${collection.name}/${key}`;
-      // traverseToken(collection, modeId, keyWithParent, object, tokens, aliases);
       traverseToken(collection, modeId, key, object, tokens, aliases);
     });
 
     fullTokenDict[collectionName] = tokens;
 
-    // processAliases(collection, modeId, aliases, tokens);
     processAliases(collection, modeId, aliases, fullTokenDict);
-    console.log("###done aliases:", aliases);
-    console.log("###done tokens:", tokens);
   }
-
-  console.log("### fullTokenDict:", fullTokenDict);
 }
 
 // ================================================== Export
@@ -394,6 +332,7 @@ async function convertToDesignTokens(
   collections: VariableCollection[]
 ): Promise<Record<string, string>> {
   let files = {};
+
   for (const collection of collections) {
     const tokenObj = await convertToDesignToken(collection);
     files = {
@@ -401,13 +340,12 @@ async function convertToDesignTokens(
       ...tokenObj,
     };
   }
+
   return files;
 }
 
 async function convertToDesignToken(collection: VariableCollection) {
   const { name: collectionName, modes, variableIds } = collection;
-
-  console.log("converting:", collectionName);
 
   // Note: Design Token W3C does not support modes yet, so we assume is always length === 1
   const mode = modes[0];
@@ -422,8 +360,6 @@ async function convertToDesignToken(collection: VariableCollection) {
 
     const { name, resolvedType, valuesByMode } = variable;
     const value = valuesByMode[mode.modeId];
-
-    // console.log("==>", name, resolvedType, value);
 
     if (
       value !== undefined &&
@@ -480,8 +416,6 @@ async function convertToDesignToken(collection: VariableCollection) {
       }
     }
   }
-
-  console.log("DONE", body);
 
   return {
     [collectionName]: body,
@@ -569,7 +503,7 @@ async function pushToBranch(
 
     if (!createFile.ok) {
       const json = await createFile.json();
-      console.log(json);
+      console.error(json);
       throw new Error(`Failed to create file: ${await createFile.text()}`);
     }
   }
@@ -630,8 +564,6 @@ async function getDesignTokenFile(
   branchName: string,
   designTokenPath: string
 ) {
-  console.log("###", branchName, designTokenPath);
-
   const headers = {
     Authorization: `Bearer ${token}`,
     Accept: "application/vnd.github.v3+json",
@@ -714,7 +646,7 @@ async function createPullRequest(
 
   if (!updatePr.ok) {
     const json = await updatePr.json();
-    console.log(json);
+    console.error(json);
     return;
   }
 
@@ -814,8 +746,6 @@ function traverseToken(
   tokens: FigmaTokenDict,
   aliases: TokenAliasDict
 ) {
-  console.log("traverseToken:", key);
-
   // if key is a meta field, move on
   if (key.charAt(0) === "$") {
     return;
@@ -833,15 +763,10 @@ function traverseToken(
         .replace(/\./g, "/")
         .replace(/[{}]/g, "");
 
-      console.log("=== var:", valueKey, key);
-
       if (tokens[valueKey]) {
-        // console.log("=== var:", object);
         tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
       } else {
-        // console.log("add alias to dict:", key, type, valueKey);
         const keyWithParent = `${collection.name}/${key}`;
-        // const keyWithParent = key;
         aliases[keyWithParent] = {
           key,
           type,
@@ -850,7 +775,6 @@ function traverseToken(
       }
     } else {
       // Handle tokens
-      // console.log("proc:", object.$type);
       switch (object.$type) {
         case "color":
           tokens[key] = createToken(
@@ -915,13 +839,9 @@ function processAliases(
   collection: VariableCollection,
   modeId: string,
   tokenAliases: TokenAliasDict,
-  // tokens: FigmaTokenDict
   tokenDict: Record<string, FigmaTokenDict>
 ) {
   const aliases = Object.values(tokenAliases);
-
-  console.log("##### aliases", aliases);
-  console.log("##### tokenDict", tokenDict);
 
   for (let i = 0; i < aliases.length; i++) {
     const { key, valueKey } = aliases[i];
@@ -929,10 +849,6 @@ function processAliases(
     const tokenKey = otherValueKeys.join("/");
     const tokens = tokenDict[collectionName];
     const token = tokens[tokenKey];
-
-    console.log("##### valueKey", valueKey);
-    console.log("##### tokenKey", tokenKey);
-    console.log("##### tokens", tokens);
 
     if (token) {
       aliases.splice(i, 1);
@@ -972,8 +888,6 @@ function createVariable(
   tokens: FigmaTokenDict
 ) {
   const token = tokens[valueKey];
-
-  console.log("create variable:", token);
 
   return createToken(collection, modeId, token.resolvedType, key, {
     type: "VARIABLE_ALIAS",
