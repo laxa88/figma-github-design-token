@@ -2,7 +2,7 @@
 
 This plugin helps do the following:
 
-- convert Figma Variables into Design Token JSON and commits the to Github.
+- convert Figma Variables into Design Token JSON and commits to Github.
 - Pull latest Design Token JSON from Github and applies changes to Figma.
 
 ## Development
