@@ -96,18 +96,70 @@
   branchField.value = "";
   pathField.value = "";
 
-  function toggleSpinner(visible) {
-    const result = visible
-      ? spinner.className
-          .split(" ")
-          .filter((c) => c !== "hidden")
-          .join(" ")
-      : spinner.className.split(" ").concat(["hidden"]).join(" ");
+  function showSpinner() {
+    spinner.className = spinner.className
+      .split(" ")
+      .filter((c) => c !== "hidden")
+      .join(" ");
+  }
 
-    spinner.className = result;
+  function hideSpinner() {
+    spinner.className = spinner.className
+      .split(" ")
+      .concat(["hidden"])
+      .join(" ");
+  }
+
+  function disableActions() {
+    tokenField.setAttribute("disabled", "");
+    ownerField.setAttribute("disabled", "");
+    repoField.setAttribute("disabled", "");
+    branchField.setAttribute("disabled", "");
+    pathField.setAttribute("disabled", "");
+
+    saveConfigButton.setAttribute("disabled", "");
+    importButton.setAttribute("disabled", "");
+    exportButton.setAttribute("disabled", "");
+  }
+
+  function enableActions() {
+    tokenField.removeAttribute("disabled");
+    ownerField.removeAttribute("disabled");
+    repoField.removeAttribute("disabled");
+    branchField.removeAttribute("disabled");
+    pathField.removeAttribute("disabled");
+
+    saveConfigButton.removeAttribute("disabled");
+    importButton.removeAttribute("disabled");
+    exportButton.removeAttribute("disabled");
+  }
+
+  function clearLogs() {
+    logs = [];
+    logText.innerText = "";
+  }
+
+  function addLog(message) {
+    logs.push(message);
+    if (logs.length > 8) {
+      logs.shift();
+      logLines++;
+    }
+    logText.innerHTML = logs
+      .map((log, index) => `${index + logLines}] ${log}`)
+      .join("</br>");
+  }
+
+  function clearErrors() {
+    errorText.innerHTML = "";
   }
 
   saveConfigButton.onclick = async () => {
+    showSpinner();
+    disableActions();
+    clearLogs();
+    clearErrors();
+
     parent.postMessage(
       {
         pluginMessage: {
@@ -124,10 +176,10 @@
   };
 
   importButton.onclick = async () => {
-    toggleSpinner(true);
-
-    importButton.setAttribute("disabled", "");
-    errorText.innerHTML = "";
+    showSpinner();
+    disableActions();
+    clearLogs();
+    clearErrors();
 
     parent.postMessage(
       {
@@ -145,8 +197,10 @@
   };
 
   exportButton.onclick = async () => {
-    exportButton.setAttribute("disabled", "");
-    errorText.innerHTML = "";
+    showSpinner();
+    disableActions();
+    clearLogs();
+    clearErrors();
 
     parent.postMessage(
       {
@@ -167,18 +221,12 @@
   window.onmessage = async (msg) => {
     const pluginMessage = msg.data.pluginMessage;
 
-    toggleSpinner(false);
+    hideSpinner();
+    enableActions();
 
     switch (pluginMessage.type) {
       case "log":
-        logs.push(pluginMessage.message);
-        if (logs.length > 8) {
-          logs.shift();
-          logLines++;
-        }
-        logText.innerHTML = logs
-          .map((log, index) => `${index + logLines}] ${log}`)
-          .join("</br>");
+        addLog(pluginMessage.message);
         break;
 
       case "config":
@@ -191,12 +239,10 @@
 
       case "import-to-figma":
         // TODO: handle error
-        importButton.removeAttribute("disabled");
         break;
 
       case "export-to-github":
         // TODO: handle error
-        exportButton.removeAttribute("disabled");
         break;
 
       default:

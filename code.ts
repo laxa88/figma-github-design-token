@@ -214,7 +214,7 @@ figma.ui.onmessage = async (msg: Message) => {
 
         const designTokens = await convertToDesignTokens(variables);
 
-        await pushToBranch(
+        const updated = await pushToBranch(
           msg.token,
           msg.owner,
           msg.repo,
@@ -223,7 +223,9 @@ figma.ui.onmessage = async (msg: Message) => {
           designTokens
         );
 
-        await createPullRequest(msg.token, msg.owner, msg.repo, msg.branch);
+        if (updated) {
+          await createPullRequest(msg.token, msg.owner, msg.repo, msg.branch);
+        }
 
         figma.ui.postMessage({
           type: "export-to-github",
@@ -447,7 +449,7 @@ async function pushToBranch(
   branchName: string,
   designTokenPath: string,
   content: Record<string, unknown>
-) {
+): Promise<boolean> {
   const headers = {
     Authorization: `Bearer ${token}`,
     Accept: "application/vnd.github.v3+json",
@@ -495,17 +497,16 @@ async function pushToBranch(
     designTokenPath
   );
 
-  const oldContentJson = await existingFile.json();
-  const oldContent = oldContentJson.content.replace(/\n/g, "");
-  const newContent = encode(content);
-
   // Note: We only want to update existing Design Tokens.
   // If we want to create new design tokens, do it in a separate action.
-
   if (existingFile.status === 200) {
+    const oldContentJson = await existingFile.json();
+    const oldContent = oldContentJson.content.replace(/\n/g, "");
+    const newContent = encode(content);
+
     if (oldContent === newContent) {
       figma.ui.postMessage({ type: "log", message: "Nothing new to commit." });
-      return;
+      return false;
     }
 
     figma.ui.postMessage({ type: "log", message: "Committing file update." });
@@ -535,7 +536,15 @@ async function pushToBranch(
       console.error(json);
       throw new Error(`Failed to create file: ${await createFile.text()}`);
     }
+
+    return true;
   }
+
+  figma.ui.postMessage({
+    type: "log",
+    message: "Couldn't find token file to update.",
+  });
+  return false;
 }
 
 async function getLatestMainBranchSha(
