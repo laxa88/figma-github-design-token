@@ -252,6 +252,11 @@ async function fetchDesignTokensFromRepo(
   branch: string,
   path: string
 ): Promise<DtObject> {
+  figma.ui.postMessage({
+    type: "log",
+    message: `Fetching data from ${owner}/${repo}/${path} (${branch})`,
+  });
+
   const res = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`,
     {
@@ -269,15 +274,19 @@ async function fetchDesignTokensFromRepo(
   const data = await res.json();
 
   if (res.status !== 200) {
+    // Possibly due to incorrect path or invalid token
     figma.ui.postMessage({
       type: "log",
-      message: `Failed to fetch data from ${owner}/${repo}/${branch}.`,
+      message: `Failed to fetch file: ${owner}/${repo}/${path} (${branch})`,
     });
     throw { res, data };
   }
 
   if (data.encoding !== "base64") {
-    console.warn("err 2");
+    figma.ui.postMessage({
+      type: "log",
+      message: `Unexpected data type: ${data.encoding}`,
+    });
     throw {
       message: "Unexpected data",
       res,
@@ -296,6 +305,8 @@ async function fetchDesignTokensFromRepo(
 }
 
 async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
+  figma.ui.postMessage({ type: "log", message: "Updating Figma Variables..." });
+
   const existingCollections = await getVariablesFromFigma();
 
   const githubCollections = Object.entries(json);
@@ -308,6 +319,11 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
     if (collectionName.startsWith("$")) {
       continue;
     }
+
+    figma.ui.postMessage({
+      type: "log",
+      message: `Processing: ${collectionName}`,
+    });
 
     // If collection already exists locally, delete it
     const existing = existingCollections.find((c) => c.name === collectionName);
@@ -328,6 +344,11 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
 
     processAliases(collection, modeId, aliases, fullTokenDict);
   }
+
+  figma.ui.postMessage({
+    type: "log",
+    message: "Figma Variables update complete.",
+  });
 }
 
 // ================================================== Export
