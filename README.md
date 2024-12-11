@@ -15,7 +15,7 @@ Requisites:
 Run:
 
 - Install dependencies `pnpm i`
-- Run in watch mode: `npm run watch`
+- Run in watch mode: `pnpm run watch`
 
 View in Figma Desktop:
 
@@ -27,8 +27,8 @@ View in Figma Desktop:
 Notes:
 
 - Figma Desktop is an Electron app. You can open the web developer console via `Plugins > Development > Show/Hide console`.
-- The plugin has hot-reload thanks to `npm run watch`. Enjoy.
+- The plugin has hot-reload thanks to `pnpm run watch`. Enjoy.
 
 ## Release
 
-Refer to the official [Figma docs](https://help.figma.com/hc/en-us/articles/360025508373-Publish-a-library) on how to publish it for public or private use.
+Refer to the official Figma docs on how to publish it for [public](https://help.figma.com/hc/en-us/articles/360025508373-Publish-a-library) or [private](https://help.figma.com/hc/en-us/articles/4404228629655-Create-private-organization-plugins) use.
