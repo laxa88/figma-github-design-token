@@ -479,13 +479,11 @@ async function pushToBranch(
 
   // ==================================================
 
-  const mainSHA = await getLatestMainBranchSha(token, owner, repo);
-
-  // ==================================================
-
   const branchExists = await isBranchExist(token, owner, repo, branchName);
 
   if (!branchExists) {
+    const mainSHA = await getLatestMainBranchSha(token, owner, repo);
+
     figma.ui.postMessage({
       type: "log",
       message: `creating new branch: ${branchName}`,
