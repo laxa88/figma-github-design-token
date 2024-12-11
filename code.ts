@@ -1,41 +1,27 @@
 // Reference
 // https://github.com/figma/plugin-samples/tree/master/variables-import-export
 
-type MessageDemo = {
-  type: "IMPORT" | "EXPORT";
-  fileName: string;
-  body: string;
-};
-
-type MessageTest = {
-  type: "test";
+type PluginConfig = {
   token: string;
   owner: string;
   repo: string;
   branch: string;
   path: string;
 };
+
+type MessageConfig = {
+  type: "save-config";
+} & PluginConfig;
 
 type MessageImport = {
   type: "import-to-figma";
-  token: string;
-  owner: string;
-  repo: string;
-  branch: string;
-  path: string;
-};
+} & PluginConfig;
 
 type MessageExport = {
   type: "export-to-github";
-  token: string;
-  owner: string;
-  repo: string;
-  branch: string;
-  path: string;
-  branchName: string; // TODO: for creating PR
-};
+} & PluginConfig;
 
-type Message = MessageDemo | MessageTest | MessageImport | MessageExport;
+type Message = MessageConfig | MessageImport | MessageExport;
 
 // ==================================================
 
@@ -161,8 +147,22 @@ console.clear();
 
 // This shows the HTML page in "ui.html".
 figma.showUI(__html__, {
-  width: 400,
-  height: 200,
+  width: 600,
+  height: 400,
+});
+
+figma.on("run", async () => {
+  const data = (await figma.clientStorage.getAsync("config")) as PluginConfig;
+
+  figma.ui.postMessage({
+    type: "log",
+    message: "Loaded config.",
+  });
+
+  figma.ui.postMessage({
+    type: "config",
+    data,
+  });
 });
 
 // Calls to "parent.postMessage" from within the HTML page will trigger this
@@ -173,8 +173,21 @@ figma.ui.onmessage = async (msg: Message) => {
   // your HTML page is to use an object with a "type" property like this.
 
   switch (msg.type) {
-    case "test":
-      // use for testing
+    case "save-config":
+      {
+        await figma.clientStorage.setAsync("config", {
+          token: msg.token,
+          owner: msg.owner,
+          repo: msg.repo,
+          branch: msg.branch,
+          path: msg.path,
+        });
+
+        figma.ui.postMessage({
+          type: "log",
+          message: "Saved config.",
+        });
+      }
       break;
 
     case "import-to-figma":
@@ -234,11 +247,11 @@ async function fetchDesignTokensFromRepo(
   token: string,
   owner: string,
   repo: string,
-  branchName: string,
+  branch: string,
   path: string
 ): Promise<DtObject> {
   const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branchName}`,
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`,
     {
       method: "GET",
       cache: "no-cache",
@@ -254,10 +267,15 @@ async function fetchDesignTokensFromRepo(
   const data = await res.json();
 
   if (res.status !== 200) {
+    figma.ui.postMessage({
+      type: "log",
+      message: `Failed to fetch data from ${owner}/${repo}/${branch}.`,
+    });
     throw { res, data };
   }
 
   if (data.encoding !== "base64") {
+    console.warn("err 2");
     throw {
       message: "Unexpected data",
       res,
@@ -477,10 +495,21 @@ async function pushToBranch(
     designTokenPath
   );
 
+  const oldContentJson = await existingFile.json();
+  const oldContent = oldContentJson.content.replace(/\n/g, "");
+  const newContent = encode(content);
+
   // Note: We only want to update existing Design Tokens.
   // If we want to create new design tokens, do it in a separate action.
+
   if (existingFile.status === 200) {
-    figma.ui.postMessage({ type: "log", message: `committing file update` });
+    if (oldContent === newContent) {
+      figma.ui.postMessage({ type: "log", message: "Nothing new to commit." });
+      return;
+    }
+
+    figma.ui.postMessage({ type: "log", message: "Committing file update." });
+
     const json = await existingFile.json();
 
     const createFile = await fetch(
@@ -494,7 +523,7 @@ async function pushToBranch(
         },
         body: JSON.stringify({
           message: "Design token update",
-          content: encode(content),
+          content: newContent,
           branch: branchName,
           sha: json.sha,
         }),

@@ -1,61 +1,117 @@
-<div>
+<link
+  rel="stylesheet"
+  href="https://cdn.jsdelivr.net/gh/thomas-lowry/figma-plugin-ds/dist/figma-plugin-ds.css"
+/>
+
+<style>
+  .expand {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .expand > input {
+    width: 250px;
+  }
+
+  .action {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem;
+  }
+
+  .log {
+    font-family: monospace;
+    padding: 0.5rem;
+  }
+
+  .hidden {
+    display: none;
+  }
+</style>
+
+<div class="section-title expand">
   <label for="token">Github API Token</label>
   <input id="token" type="text" />
 </div>
 
-<div>
+<div class="section-title expand">
   <label for="token">Owner</label>
   <input id="owner" type="text" />
 </div>
 
-<div>
+<div class="section-title expand">
   <label for="repo">Repository</label>
   <input id="repo" type="text" />
 </div>
 
-<div>
+<div class="section-title expand">
   <label for="branch">Branch</label>
   <input id="branch" type="text" />
 </div>
 
-<div>
+<div class="section-title expand">
   <label for="path">Design Token file path</label>
   <input id="path" type="text" />
 </div>
 
-<button id="testButton">Test</button>
-<button id="importButton">Import</button>
-<button id="exportButton">Export</button>
-<div id="errors"></div>
-<div id="logs"></div>
+<div class="action">
+  <button class="button button--secondary" id="saveConfigButton">
+    Save Config
+  </button>
+
+  <div class="expand">
+    <div id="spinner" class="hidden icon icon--spinner icon--spin"></div>
+    <button class="button button--primary" id="importButton">Import</button>
+    <button class="button button--primary" id="exportButton">Export</button>
+  </div>
+</div>
+
+<div id="errors" class="log"></div>
+<div id="logs" class="log"></div>
 
 <script>
+  let logLines = 1;
+
   const tokenField = document.getElementById("token");
   const ownerField = document.getElementById("owner");
   const repoField = document.getElementById("repo");
   const branchField = document.getElementById("branch");
   const pathField = document.getElementById("path");
 
-  const testButton = document.getElementById("testButton");
+  const saveConfigButton = document.getElementById("saveConfigButton");
+
+  const spinner = document.getElementById("spinner");
   const importButton = document.getElementById("importButton");
   const exportButton = document.getElementById("exportButton");
+
   const errorText = document.getElementById("errors");
   const logText = document.getElementById("logs");
 
   let logs = [];
 
-  // TODO: hard-code this if you need a default
   tokenField.value = "";
   ownerField.value = "";
   repoField.value = "";
   branchField.value = "";
   pathField.value = "";
 
-  testButton.onclick = async () => {
+  function toggleSpinner(visible) {
+    const result = visible
+      ? spinner.className
+          .split(" ")
+          .filter((c) => c !== "hidden")
+          .join(" ")
+      : spinner.className.split(" ").concat(["hidden"]).join(" ");
+
+    spinner.className = result;
+  }
+
+  saveConfigButton.onclick = async () => {
     parent.postMessage(
       {
         pluginMessage: {
-          type: "test",
+          type: "save-config",
           token: tokenField.value,
           owner: ownerField.value,
           repo: repoField.value,
@@ -68,6 +124,8 @@
   };
 
   importButton.onclick = async () => {
+    toggleSpinner(true);
+
     importButton.setAttribute("disabled", "");
     errorText.innerHTML = "";
 
@@ -108,15 +166,27 @@
   // This receives data from code.ts via postMessage
   window.onmessage = async (msg) => {
     const pluginMessage = msg.data.pluginMessage;
-    console.log(pluginMessage);
+
+    toggleSpinner(false);
 
     switch (pluginMessage.type) {
       case "log":
-        logs.unshift(pluginMessage.message);
-        if (logs.length > 5) {
-          logs.pop();
+        logs.push(pluginMessage.message);
+        if (logs.length > 8) {
+          logs.shift();
+          logLines++;
         }
-        logText.innerHTML = logs.join("</br>");
+        logText.innerHTML = logs
+          .map((log, index) => `${index + logLines}] ${log}`)
+          .join("</br>");
+        break;
+
+      case "config":
+        tokenField.value = pluginMessage.data.token;
+        ownerField.value = pluginMessage.data.owner;
+        repoField.value = pluginMessage.data.repo;
+        branchField.value = pluginMessage.data.branch;
+        pathField.value = pluginMessage.data.path;
         break;
 
       case "import-to-figma":

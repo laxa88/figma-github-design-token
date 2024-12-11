@@ -9,6 +9,10 @@
   "editorType": ["figma"],
   "ui": "ui.html",
   "networkAccess": {
-    "allowedDomains": ["https://api.github.com"]
+    "allowedDomains": [
+      "https://api.github.com",
+      "https://cdn.jsdelivr.net",
+      "https://rsms.me"
+    ]
   }
 }
