@@ -31,4 +31,4 @@ Notes:
 
 ## Release
 
-TODO
+Refer to the official [Figma docs](https://help.figma.com/hc/en-us/articles/360025508373-Publish-a-library) on how to publish it for public or private use.
