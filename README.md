@@ -28,6 +28,7 @@ Notes:
 
 - Figma Desktop is an Electron app. You can open the web developer console via `Plugins > Development > Show/Hide console`.
 - The plugin has hot-reload thanks to `pnpm run watch`. Enjoy.
+- The plugin uses Thomas Lowry's [Figma Plugin UI library](https://github.com/thomas-lowry/figma-plugin-ds?tab=readme-ov-file#labels-and-sections).
 
 ## Release
 
