@@ -210,6 +210,14 @@ figma.ui.onmessage = async (msg: Message) => {
 
     case "export-to-github":
       {
+        if (msg.branch.trim() === "main") {
+          figma.ui.postMessage({
+            type: "log",
+            message: "Cannot push to main branch.",
+          });
+          return;
+        }
+
         const variables = await getVariablesFromFigma();
 
         const designTokens = await convertToDesignTokens(variables);
@@ -227,9 +235,7 @@ figma.ui.onmessage = async (msg: Message) => {
           await createPullRequest(msg.token, msg.owner, msg.repo, msg.branch);
         }
 
-        figma.ui.postMessage({
-          type: "export-to-github",
-        });
+        figma.ui.postMessage({ type: "export-to-github" });
       }
       break;
 
