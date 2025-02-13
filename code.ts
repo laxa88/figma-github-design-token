@@ -319,6 +319,15 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
 
   const fullTokenDict: Record<string, FigmaTokenDict> = {};
 
+  const aliasToProcess: Record<
+    string,
+    {
+      collection: VariableCollection;
+      modeId: string;
+      aliases: TokenAliasDict;
+    }
+  > = {};
+
   for (let i = 0; i < githubCollections.length; i++) {
     const [collectionName, content] = githubCollections[i];
 
@@ -348,6 +357,13 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
 
     fullTokenDict[collectionName] = tokens;
 
+    aliasToProcess[collectionName] = { collection, modeId, aliases };
+  }
+
+  // Process aliases AFTER all the collections are known
+  const toProcess = Object.values(aliasToProcess);
+  for (let i = 0; i < toProcess.length; i++) {
+    const { collection, modeId, aliases } = toProcess[i];
     processAliases(collection, modeId, aliases, fullTokenDict);
   }
 
