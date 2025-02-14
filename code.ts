@@ -126,6 +126,7 @@ type TokenAlias = {
   valueKey: string;
 };
 type TokenAliasDict = Record<string, TokenAlias>;
+type CollectionVariableDict = Record<string, Variable[]>;
 
 type DtObject =
   | {
@@ -218,9 +219,9 @@ figma.ui.onmessage = async (msg: Message) => {
           return;
         }
 
-        const variables = await getVariablesFromFigma();
+        const { collections } = await getVariablesFromFigma();
 
-        const designTokens = await convertToDesignTokens(variables);
+        const designTokens = await convertToDesignTokens(collections);
 
         const updated = await pushToBranch(
           msg.token,
@@ -313,7 +314,8 @@ async function fetchDesignTokensFromRepo(
 async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
   figma.ui.postMessage({ type: "log", message: "Updating Figma Variables..." });
 
-  const existingCollections = await getVariablesFromFigma();
+  const { collections: existingCollections, variablesDict } =
+    await getVariablesFromFigma();
 
   const githubCollections = Object.entries(json);
 
@@ -323,10 +325,16 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
     string,
     {
       collection: VariableCollection;
+      variables: Variable[];
       modeId: string;
       aliases: TokenAliasDict;
     }
   > = {};
+
+  figma.ui.postMessage({
+    type: "log",
+    message: "Processing collections...",
+  });
 
   for (let i = 0; i < githubCollections.length; i++) {
     const [collectionName, content] = githubCollections[i];
@@ -340,31 +348,73 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
       message: `Processing: ${collectionName}`,
     });
 
-    // If collection already exists locally, delete it
-    const existing = existingCollections.find((c) => c.name === collectionName);
-    if (existing) {
-      existing.remove();
+    let existingCollection = existingCollections.find(
+      (c) => c.name === collectionName
+    );
+    let existingVariables: Variable[] = [];
+    let modeId: string;
+
+    if (existingCollection) {
+      modeId = existingCollection.modes[0].modeId;
+      existingVariables = variablesDict[collectionName];
+
+      if (!existingVariables) {
+        figma.ui.postMessage({
+          type: "log",
+          message: `Warning: Variables not found for ${collectionName}`,
+        });
+      }
+
+      figma.ui.postMessage({
+        type: "log",
+        message: `Collection exists: ${existingCollection.name} (modeId: ${modeId})`,
+      });
+    } else {
+      const newCollection = createCollection(collectionName);
+      existingCollection = newCollection.collection;
+      modeId = newCollection.modeId;
+
+      figma.ui.postMessage({
+        type: "log",
+        message: `New collection: ${existingCollection.name} (modeId: ${modeId})`,
+      });
     }
 
-    // Create new collection
-    const { collection, modeId } = createCollection(collectionName);
     const aliases: TokenAliasDict = {};
     const tokens: FigmaTokenDict = {};
 
     Object.entries(content as object).forEach(([key, object]) => {
-      traverseToken(collection, modeId, key, object, tokens, aliases);
+      traverseToken(
+        existingCollection,
+        existingVariables,
+        modeId,
+        key,
+        object,
+        tokens,
+        aliases
+      );
     });
 
     fullTokenDict[collectionName] = tokens;
 
-    aliasToProcess[collectionName] = { collection, modeId, aliases };
+    aliasToProcess[collectionName] = {
+      collection: existingCollection,
+      variables: existingVariables,
+      modeId,
+      aliases,
+    };
   }
+
+  figma.ui.postMessage({
+    type: "log",
+    message: "Processing aliases...",
+  });
 
   // Process aliases AFTER all the collections are known
   const toProcess = Object.values(aliasToProcess);
   for (let i = 0; i < toProcess.length; i++) {
-    const { collection, modeId, aliases } = toProcess[i];
-    processAliases(collection, modeId, aliases, fullTokenDict);
+    const { collection, variables, modeId, aliases } = toProcess[i];
+    processAliases(collection, variables, modeId, aliases, fullTokenDict);
   }
 
   figma.ui.postMessage({
@@ -375,20 +425,75 @@ async function applyDesignTokensToFigma(json: DtObject): Promise<void> {
 
 // ================================================== Export
 
-async function getVariablesFromFigma(): Promise<VariableCollection[]> {
+async function getVariablesFromFigma(): Promise<{
+  collections: VariableCollection[];
+  variablesDict: CollectionVariableDict;
+}> {
   const collections = await figma.variables.getLocalVariableCollectionsAsync();
+  const variablesDict: CollectionVariableDict = {};
 
+  // Note: It is possible to have duplicate collection name.
+  // Figma collections allow duplicates because their IDs are unique,
+  // but Design Tokens do not store Figma IDs.
+  // As such, we DO NOT allow duplicate collection names in this plugin.
   for (const collection of collections) {
-    if (collection.modes.length > 1) {
-      const name = collection.name;
+    const name = collection.name;
+
+    if (collections.filter((c) => c.name === name).length > 1) {
       figma.ui.postMessage({
         type: "log",
-        message: `Collection "${name}" has more than one mode. Design Tokens currently does not support modes. Please split the modes into separate collections instead and try again.`,
+        message: `Warning! Duplicate collection name "${name}" found. Only one will be used and updated, others will be ignored.`,
+      });
+    }
+
+    if (collection.modes.length > 1) {
+      figma.ui.postMessage({
+        type: "log",
+        message: `Warning! Collection "${name}" has more than one mode. Design Tokens currently does not support modes. Please split the modes into separate collections instead and try again.`,
       });
     }
   }
 
-  return collections;
+  // Note: It is possible to have duplicate variable name
+  // Examples:
+  // - collection1 = text/primary
+  // - collection2 = text/primary
+  // To distinguish them, we need to group them by their parent collection.
+  const localVariables = await figma.variables.getLocalVariablesAsync();
+  for (const variable of localVariables) {
+    const collection = getCollectionById(
+      collections,
+      variable.variableCollectionId
+    );
+
+    if (!variablesDict[collection.name]) {
+      variablesDict[collection.name] = [];
+    }
+    variablesDict[collection.name].push(variable);
+  }
+
+  return {
+    collections,
+    variablesDict,
+  };
+}
+
+function getCollectionById(collections: VariableCollection[], id: string) {
+  for (const collection of collections) {
+    if (collection.id === id) {
+      return collection;
+    }
+  }
+  throw new Error(`Collection ID not found: ${id}`);
+}
+
+function getCollectionByName(collections: VariableCollection[], name: string) {
+  for (const collection of collections) {
+    if (collection.name === name) {
+      return collection;
+    }
+  }
+  throw new Error(`Collection name not found: ${name}`);
 }
 
 async function convertToDesignTokens(
@@ -819,6 +924,7 @@ function isString(x: unknown): x is string {
 
 function traverseToken(
   collection: VariableCollection,
+  variables: Variable[],
   modeId: string,
   key: string,
   object: DtObject,
@@ -832,6 +938,7 @@ function traverseToken(
 
   // If this is a token, then read the type and value.
   // else this is a nested object, traverse into it.
+
   if (isItem(object) && object.$value !== undefined) {
     const type = object.$type;
 
@@ -843,7 +950,14 @@ function traverseToken(
         .replace(/[{}]/g, "");
 
       if (tokens[valueKey]) {
-        tokens[key] = createVariable(collection, modeId, key, valueKey, tokens);
+        tokens[key] = createVariable(
+          collection,
+          variables,
+          modeId,
+          key,
+          valueKey,
+          tokens
+        );
       } else {
         const keyWithParent = `${collection.name}/${key}`;
         aliases[keyWithParent] = {
@@ -858,6 +972,7 @@ function traverseToken(
         case "color":
           tokens[key] = createToken(
             collection,
+            variables,
             modeId,
             "COLOR",
             key,
@@ -875,6 +990,7 @@ function traverseToken(
           // TODO: if the value is a string with "{", compute the referenced values
           tokens[key] = createToken(
             collection,
+            variables,
             modeId,
             "FLOAT",
             key,
@@ -886,6 +1002,7 @@ function traverseToken(
           if (isString(object.$value)) {
             tokens[key] = createToken(
               collection,
+              variables,
               modeId,
               "STRING",
               key,
@@ -900,11 +1017,16 @@ function traverseToken(
   } else {
     Object.entries(object as object).forEach(([key2, object2]) => {
       // Only traverse if key is not a meta field like "$theme"
+
+      // Note: token name paths MUST be separated by "/"
+      const recurseKey = `${key}/${key2}`;
+
       if (key2.charAt(0) !== "$") {
         traverseToken(
           collection,
+          variables,
           modeId,
-          `${key}/${key2}`,
+          recurseKey,
           object2,
           tokens,
           aliases
@@ -916,6 +1038,7 @@ function traverseToken(
 
 function processAliases(
   collection: VariableCollection,
+  variables: Variable[],
   modeId: string,
   tokenAliases: TokenAliasDict,
   tokenDict: Record<string, FigmaTokenDict>
@@ -935,10 +1058,18 @@ function processAliases(
     const token = tokens[tokenKey];
 
     if (token) {
-      tokens[key] = createVariable(collection, modeId, key, tokenKey, tokens);
+      tokens[key] = createVariable(
+        collection,
+        variables,
+        modeId,
+        key,
+        tokenKey,
+        tokens
+      );
     } else {
       tokens[tokenKey] = createToken(
         collection,
+        variables,
         modeId,
         "STRING",
         key,
@@ -950,27 +1081,36 @@ function processAliases(
 
 function createToken(
   collection: VariableCollection,
+  variables: Variable[],
   modeId: string,
   resolvedType: VariableResolvedDataType,
   name: string,
   value: VariableValue
 ) {
-  try {
-    const token = figma.variables.createVariable(
-      name,
-      collection,
-      resolvedType
-    );
-    token.setValueForMode(modeId, value);
-    return token;
-  } catch (err) {
-    console.error(`createToken: ${collection.name}, ${name}, ${value}`);
-    throw err;
+  const existingToken = variables.find((v) => v.name === name);
+
+  if (existingToken) {
+    existingToken.setValueForMode(modeId, value);
+    return existingToken;
+  } else {
+    try {
+      const token = figma.variables.createVariable(
+        name,
+        collection,
+        resolvedType
+      );
+      token.setValueForMode(modeId, value);
+      return token;
+    } catch (err) {
+      console.error(`createToken: ${collection.name}, ${name}, ${value}`);
+      throw err;
+    }
   }
 }
 
 function createVariable(
   collection: VariableCollection,
+  variables: Variable[],
   modeId: string,
   key: string,
   valueKey: string,
@@ -978,7 +1118,7 @@ function createVariable(
 ) {
   const token = tokens[valueKey];
 
-  return createToken(collection, modeId, token.resolvedType, key, {
+  return createToken(collection, variables, modeId, token.resolvedType, key, {
     type: "VARIABLE_ALIAS",
     id: `${token.id}`,
   });
