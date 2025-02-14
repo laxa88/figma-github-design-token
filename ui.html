@@ -141,7 +141,7 @@
 
   function addLog(message) {
     logs.push(message);
-    if (logs.length > 8) {
+    if (logs.length > 100) {
       logs.shift();
       logLines++;
     }
