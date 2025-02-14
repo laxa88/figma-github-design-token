@@ -944,10 +944,7 @@ function traverseToken(
 
     if (isString(object.$value) && isAlias(object.$value)) {
       // Handle aliases
-      const valueKey = object.$value
-        .trim()
-        .replace(/\./g, "/")
-        .replace(/[{}]/g, "");
+      const valueKey = object.$value.trim().replace(/[{}]/g, "");
 
       if (tokens[valueKey]) {
         tokens[key] = createVariable(
@@ -959,7 +956,11 @@ function traverseToken(
           tokens
         );
       } else {
-        const keyWithParent = `${collection.name}/${key}`;
+        // Notes:
+        // - `collection.name` is a string that may contain symbols, for example `material/colors`
+        // - `key` uses a path-based naming structure, example "primary/blue/700"
+        // - To distinguish between collectionName and key path, we use a unique delimiter `___` here.
+        const keyWithParent = `${collection.name}___${key}`;
         aliases[keyWithParent] = {
           key,
           type,
@@ -1050,10 +1051,12 @@ function processAliases(
     // valueKey = "core/colors/white"
     const { key, valueKey } = aliases[i];
 
-    // collectionName = "core"
-    // tokenKey = "colors/white"
-    const [collectionName, ...otherValueKeys] = valueKey.split("/");
-    const tokenKey = otherValueKeys.join("/");
+    // Example: material/colors.blue.700 -> ["material/colors", "blue", "700"]
+    const [collectionName, ...tokenKeys] = valueKey.split(".");
+
+    // Example: ["blue", "700"] -> "blue/700"
+    const tokenKey = tokenKeys.join("/");
+
     const tokens = tokenDict[collectionName];
     const token = tokens[tokenKey];
 
